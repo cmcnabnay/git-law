@@ -94,6 +94,7 @@ export const api = {
   createRepo: (name: string, participants: { displayName: string; email: string }[]) =>
     request<Repo>("/repos", { method: "POST", body: JSON.stringify({ name, participants }) }),
   getRepo: (repoId: string) => request<Repo>(`/repos/${repoId}`),
+  deleteRepo: (repoId: string) => request<{ ok: true; deleted: Repo }>(`/repos/${repoId}`, { method: "DELETE" }),
   getTree: (repoId: string, ref: string) =>
     request<TreeEntry[]>(`/repos/${repoId}/tree?ref=${encodeURIComponent(ref)}`),
   getPreview: (repoId: string, rev: string, path: string) =>

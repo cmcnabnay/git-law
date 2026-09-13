@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Repo, type PullRequest, type TreeEntry } from "../api/client.js";
 
 function StatusBadge({ status }: { status: PullRequest["status"] }) {
@@ -36,12 +36,14 @@ function FileRow({ repo, refName, entry }: { repo: Repo; refName: string; entry:
 
 export function RepoDetailPage() {
   const { repoId } = useParams<{ repoId: string }>();
+  const navigate = useNavigate();
   const [repo, setRepo] = useState<Repo | null>(null);
   const [prs, setPrs] = useState<PullRequest[]>([]);
   const [tree, setTree] = useState<TreeEntry[]>([]);
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [treeError, setTreeError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   function load() {
     if (!repoId) return;
@@ -57,20 +59,41 @@ export function RepoDetailPage() {
   useEffect(load, [repoId]);
 
   useEffect(() => {
-    if (!repoId || !selectedRef) return;
+    // No branches yet means nothing has ever been pushed — the ref this
+    // would ask for (repo.default_branch) doesn't exist in the bare repo
+    // yet, so skip the request instead of surfacing a raw git error.
+    if (!repoId || !selectedRef || (repo && repo.branches?.length === 0)) return;
     setTreeError(null);
     api
       .getTree(repoId, selectedRef)
       .then(setTree)
       .catch((e) => setTreeError(e.message));
-  }, [repoId, selectedRef]);
+  }, [repoId, selectedRef, repo]);
+
+  function handleDelete() {
+    if (!repo) return;
+    if (!window.confirm(`Permanently delete "${repo.name}" and all its history? This cannot be undone.`)) return;
+    setDeleting(true);
+    api
+      .deleteRepo(repo.id)
+      .then(() => navigate("/"))
+      .catch((e) => {
+        setError(e.message);
+        setDeleting(false);
+      });
+  }
 
   if (error) return <p style={{ color: "var(--danger)" }}>{error}</p>;
   if (!repo) return <p>Loading...</p>;
 
   return (
     <div>
-      <h2>{repo.name}</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h2>{repo.name}</h2>
+        <button className="danger" onClick={handleDelete} disabled={deleting}>
+          {deleting ? "Deleting…" : "Delete repo"}
+        </button>
+      </div>
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Clone this repo</h3>
@@ -116,8 +139,9 @@ export function RepoDetailPage() {
         <h3 style={{ marginTop: 0 }}>
           Files {selectedRef && <span style={{ color: "var(--muted)", fontWeight: "normal" }}>@ {selectedRef}</span>}
         </h3>
-        {treeError && <p style={{ color: "var(--danger)" }}>{treeError}</p>}
-        {!treeError && tree.length === 0 && <p>No files pushed to this branch yet.</p>}
+        {(repo.branches ?? []).length === 0 && <p>Nothing pushed to this repo yet — clone it and push to see files here.</p>}
+        {(repo.branches ?? []).length > 0 && treeError && <p style={{ color: "var(--danger)" }}>{treeError}</p>}
+        {(repo.branches ?? []).length > 0 && !treeError && tree.length === 0 && <p>No files pushed to this branch yet.</p>}
         {tree.map((entry) => (
           <FileRow key={entry.path} repo={repo} refName={selectedRef ?? repo.default_branch} entry={entry} />
         ))}
