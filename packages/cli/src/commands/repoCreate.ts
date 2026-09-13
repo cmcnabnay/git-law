@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { createRepo } from "@gitlaw/core";
+import { createRepo, loadConfig, repoCloneUrl } from "@gitlaw/core";
 
 function parseParticipant(spec: string): { displayName: string; email: string } {
   const match = spec.match(/^(.*)<(.+)>$/);
@@ -20,8 +20,9 @@ export function registerRepoCreate(repoCmd: Command) {
     .action((name: string, opts: { participant?: string[] }) => {
       const participants = (opts.participant ?? []).map(parseParticipant);
       const repo = createRepo({ name, participants });
+      const cloneUrl = repoCloneUrl(loadConfig(), repo.id);
       console.log(`Created repo "${repo.name}" (id: ${repo.id})`);
-      console.log(`\nTo clone it:\n  git clone ${repo.bare_path} ${repo.name}`);
+      console.log(`\nTo clone it:\n  git clone ${cloneUrl} ${repo.name}`);
       if (participants.length > 0) {
         console.log(`\nEach participant should set their identity inside their own clone, e.g.:`);
         for (const p of participants) {

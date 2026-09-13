@@ -8,6 +8,7 @@ export interface Repo {
   participants?: Participant[];
   branches?: BranchInfo[];
   clonePath?: string;
+  cloneUrl?: string;
 }
 
 export interface Participant {

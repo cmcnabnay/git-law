@@ -74,7 +74,7 @@ export function RepoDetailPage() {
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Clone this repo</h3>
-        <code className="clone-cmd">git clone {repo.clonePath ?? repo.bare_path} {repo.name}</code>
+        <code className="clone-cmd">git clone {repo.cloneUrl ?? repo.clonePath ?? repo.bare_path} {repo.name}</code>
         <p style={{ color: "var(--muted)", fontSize: 13 }}>
           To be identified as a specific participant, run <code className="mono">git config user.email "you@example.com"</code>{" "}
           inside your clone, matching a registered participant below.

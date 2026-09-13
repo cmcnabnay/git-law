@@ -9,6 +9,8 @@ import {
   readBlob,
   listTree,
   readWordDocument,
+  loadConfig,
+  repoCloneUrl,
 } from "@gitlaw/core";
 import path from "node:path";
 
@@ -30,7 +32,7 @@ reposRouter.post("/", (req, res) => {
     return res.status(400).json({ error: "name is required" });
   }
   const repo = createRepo({ name, participants });
-  res.status(201).json({ ...repo, clonePath: repo.bare_path });
+  res.status(201).json({ ...repo, clonePath: repo.bare_path, cloneUrl: repoCloneUrl(loadConfig(), repo.id) });
 });
 
 reposRouter.get("/", (_req, res) => {
@@ -49,6 +51,7 @@ reposRouter.get("/:repoId", (req, res) => {
     participants: participantsRepo.listForRepo(repo.id),
     branches: listBranches(repo.bare_path),
     clonePath: repo.bare_path,
+    cloneUrl: repoCloneUrl(loadConfig(), repo.id),
   });
 });
 
