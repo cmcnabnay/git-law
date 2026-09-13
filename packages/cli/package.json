@@ -1,0 +1,13 @@
+{
+  "name": "@gitlaw/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "gitlaw": "src/bin.ts"
+  },
+  "dependencies": {
+    "@gitlaw/core": "*",
+    "@gitlaw/server": "*",
+    "commander": "^12.1.0"
+  }
+}
