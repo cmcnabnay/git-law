@@ -7,12 +7,13 @@ CREATE TABLE IF NOT EXISTS repos (
 );
 
 CREATE TABLE IF NOT EXISTS participants (
-  id           TEXT PRIMARY KEY,
-  repo_id      TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-  display_name TEXT NOT NULL,
-  email        TEXT NOT NULL,
-  role         TEXT NOT NULL DEFAULT 'party',
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  id            TEXT PRIMARY KEY,
+  repo_id       TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+  display_name  TEXT NOT NULL,
+  email         TEXT NOT NULL,
+  role          TEXT NOT NULL DEFAULT 'party',
+  password_hash TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(repo_id, email)
 );
 

@@ -8,6 +8,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let db: Database.Database | null = null;
 
+// schema.sql's CREATE TABLE IF NOT EXISTS only shapes brand-new databases —
+// a database file created before a column was added needs it bolted on
+// explicitly. Add one guarded ALTER TABLE per such column here.
+function migrate(database: Database.Database): void {
+  const participantColumns = database.prepare(`PRAGMA table_info(participants)`).all() as { name: string }[];
+  if (!participantColumns.some((c) => c.name === "password_hash")) {
+    database.exec(`ALTER TABLE participants ADD COLUMN password_hash TEXT`);
+  }
+}
+
 export function getDb(): Database.Database {
   if (db) return db;
   initDataDir();
@@ -17,6 +27,7 @@ export function getDb(): Database.Database {
   db.pragma("foreign_keys = ON");
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
+  migrate(db);
   return db;
 }
 

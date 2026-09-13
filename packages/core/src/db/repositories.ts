@@ -1,5 +1,6 @@
 import { customAlphabet } from "nanoid";
 import { getDb } from "./client.js";
+import { hashPassword, verifyPassword as verifyPasswordHash } from "../auth/password.js";
 
 // Alphanumeric only — these ids end up in REST URLs, so avoid characters
 // that are awkward there (e.g. a leading '-' from the default alphabet).
@@ -19,6 +20,7 @@ export interface Participant {
   display_name: string;
   email: string;
   role: string;
+  password_hash: string | null;
   created_at: string;
 }
 
@@ -73,14 +75,28 @@ export const reposRepo = {
 };
 
 export const participantsRepo = {
-  add(input: { repoId: string; displayName: string; email: string; role?: string }): Participant {
+  /** `password`, when given, is hashed before storage — never persisted in
+   * plaintext. Re-adding an existing (repoId, email) updates the display
+   * name and, only if a new password was passed, replaces the password hash
+   * (an omitted password leaves the existing credential untouched). */
+  add(input: {
+    repoId: string;
+    displayName: string;
+    email: string;
+    role?: string;
+    password?: string;
+  }): Participant {
     const id = nanoid(10);
+    const passwordHash = input.password ? hashPassword(input.password) : null;
     getDb()
       .prepare(
-        `INSERT INTO participants (id, repo_id, display_name, email, role) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(repo_id, email) DO UPDATE SET display_name = excluded.display_name`
+        `INSERT INTO participants (id, repo_id, display_name, email, role, password_hash)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(repo_id, email) DO UPDATE SET
+           display_name = excluded.display_name,
+           password_hash = COALESCE(excluded.password_hash, participants.password_hash)`
       )
-      .run(id, input.repoId, input.displayName, input.email, input.role ?? "party");
+      .run(id, input.repoId, input.displayName, input.email, input.role ?? "party", passwordHash);
     return getDb()
       .prepare(`SELECT * FROM participants WHERE repo_id = ? AND email = ?`)
       .get(input.repoId, input.email) as Participant;
@@ -89,6 +105,20 @@ export const participantsRepo = {
     return getDb()
       .prepare(`SELECT * FROM participants WHERE repo_id = ? ORDER BY created_at ASC`)
       .all(repoId) as Participant[];
+  },
+  findByEmail(repoId: string, email: string): Participant | undefined {
+    return getDb()
+      .prepare(`SELECT * FROM participants WHERE repo_id = ? AND email = ?`)
+      .get(repoId, email) as Participant | undefined;
+  },
+  /** Checks a plaintext password against the stored hash for this
+   * participant. A participant with no password set (e.g. added before
+   * credentials existed) never verifies — they need a password issued via
+   * `gitlaw participant add` before they can authenticate. */
+  verifyPassword(repoId: string, email: string, password: string): boolean {
+    const participant = participantsRepo.findByEmail(repoId, email);
+    if (!participant?.password_hash) return false;
+    return verifyPasswordHash(password, participant.password_hash);
   },
   /** The "other" party relative to an actor, used only for the advisory turn badge. */
   otherParty(repoId: string, actorEmail: string | null): string | null {
