@@ -75,6 +75,9 @@ export interface PrDetail {
 export interface TreeEntry {
   path: string;
   size: number;
+  lastCommitSha: string;
+  lastCommitMessage: string;
+  lastCommitDate: string;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

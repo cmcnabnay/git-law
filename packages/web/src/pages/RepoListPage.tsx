@@ -10,6 +10,7 @@ export function RepoListPage() {
   const [name, setName] = useState("");
   const [participantsText, setParticipantsText] = useState("");
   const [creating, setCreating] = useState(false);
+  const [justCreated, setJustCreated] = useState<Repo | null>(null);
 
   function load() {
     setLoading(true);
@@ -37,7 +38,8 @@ export function RepoListPage() {
           if (!match) throw new Error(`Invalid participant "${spec}" — use "Name <email>"`);
           return { displayName: match[1].trim(), email: match[2].trim() };
         });
-      await api.createRepo(name.trim(), participants);
+      const repo = await api.createRepo(name.trim(), participants);
+      setJustCreated(repo);
       setName("");
       setParticipantsText("");
       load();
@@ -51,6 +53,32 @@ export function RepoListPage() {
   return (
     <div>
       <h2>Repos</h2>
+
+      {justCreated && (
+        <div className="card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <h3 style={{ marginTop: 0 }}>Quick setup — {justCreated.name}</h3>
+            <button onClick={() => setJustCreated(null)}>Done</button>
+          </div>
+
+          <p style={{ color: "var(--muted)", fontSize: 13 }}>…or push an existing repository from the command line</p>
+          <pre className="clone-cmd">
+{`git remote add origin ${justCreated.cloneUrl}
+git branch -M main
+git push -u origin main`}
+          </pre>
+
+          <p style={{ color: "var(--muted)", fontSize: 13 }}>…or create a new repository on the command line</p>
+          <pre className="clone-cmd">
+{`git init
+git add .
+git commit -m "first commit"
+git branch -M main
+git remote add origin ${justCreated.cloneUrl}
+git push -u origin main`}
+          </pre>
+        </div>
+      )}
 
       <form className="card" onSubmit={handleCreate}>
         <h3 style={{ marginTop: 0 }}>Create a repo</h3>
@@ -82,7 +110,7 @@ export function RepoListPage() {
               <Link to={`/repos/${r.id}`}>
                 <strong>{r.name}</strong>
               </Link>
-              <div className="mono">{r.bare_path}</div>
+              <div className="mono">{r.cloneUrl ?? r.bare_path}</div>
             </div>
             <span className="badge open">{r.openPrCount ?? 0} open PR{r.openPrCount === 1 ? "" : "s"}</span>
           </div>

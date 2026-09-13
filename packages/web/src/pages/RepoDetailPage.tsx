@@ -11,6 +11,26 @@ function formatBytes(n: number): string {
   return `${(n / 1024).toFixed(1)} KB`;
 }
 
+function timeAgo(iso: string): string {
+  if (!iso) return "";
+  const diffSec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  const plural = (n: number) => (Math.floor(n) === 1 ? "" : "s");
+  const mins = diffSec / 60;
+  const hours = mins / 60;
+  const days = hours / 24;
+  const weeks = days / 7;
+  const months = days / 30.44;
+  const years = days / 365.25;
+
+  if (diffSec < 60) return `${Math.floor(diffSec)} second${plural(diffSec)} ago`;
+  if (mins < 60) return `${Math.floor(mins)} minute${plural(mins)} ago`;
+  if (hours < 24) return `${Math.floor(hours)} hour${plural(hours)} ago`;
+  if (days < 7) return `${Math.floor(days)} day${plural(days)} ago`;
+  if (weeks < 4.345) return `${Math.floor(weeks)} week${plural(weeks)} ago`;
+  if (months < 12) return `${Math.floor(months)} month${plural(months)} ago`;
+  return `${Math.floor(years)} year${plural(years)} ago`;
+}
+
 function FileRow({ repo, refName, entry }: { repo: Repo; refName: string; entry: TreeEntry }) {
   const blobHref = `/repos/${repo.id}/blob?ref=${encodeURIComponent(refName)}&path=${encodeURIComponent(entry.path)}`;
 
@@ -19,8 +39,11 @@ function FileRow({ repo, refName, entry }: { repo: Repo; refName: string; entry:
       <div>
         <Link to={blobHref} className="mono">
           {entry.path}
-        </Link>{" "}
-        <span style={{ color: "var(--muted)", fontSize: 12 }}>{formatBytes(entry.size)}</span>
+        </Link>
+        <div style={{ color: "var(--muted)", fontSize: 12 }}>
+          {entry.lastCommitMessage || "—"}
+          {entry.lastCommitDate && ` · ${timeAgo(entry.lastCommitDate)}`} · {formatBytes(entry.size)}
+        </div>
       </div>
       <div style={{ display: "flex", gap: 8 }}>
         <Link to={blobHref}>
@@ -142,6 +165,25 @@ export function RepoDetailPage() {
         {(repo.branches ?? []).length === 0 && <p>Nothing pushed to this repo yet — clone it and push to see files here.</p>}
         {(repo.branches ?? []).length > 0 && treeError && <p style={{ color: "var(--danger)" }}>{treeError}</p>}
         {(repo.branches ?? []).length > 0 && !treeError && tree.length === 0 && <p>No files pushed to this branch yet.</p>}
+        {(() => {
+          const currentBranch = (repo.branches ?? []).find((b) => b.name === (selectedRef ?? repo.default_branch));
+          if (!currentBranch || tree.length === 0) return null;
+          return (
+            <div
+              className="repo-row"
+              style={{ background: "var(--card-alt, rgba(127,127,127,0.08))", borderRadius: 6, padding: "8px 10px", marginBottom: 8 }}
+            >
+              <div>
+                <strong>{currentBranch.lastCommitAuthorEmail}</strong>{" "}
+                <span>{currentBranch.lastCommitMessage}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--muted)", fontSize: 12 }}>
+                <span className="mono">{currentBranch.headSha.slice(0, 7)}</span>
+                <span>{timeAgo(currentBranch.lastCommitDate)}</span>
+              </div>
+            </div>
+          );
+        })()}
         {tree.map((entry) => (
           <FileRow key={entry.path} repo={repo} refName={selectedRef ?? repo.default_branch} entry={entry} />
         ))}

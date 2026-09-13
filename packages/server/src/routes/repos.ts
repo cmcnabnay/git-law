@@ -36,9 +36,11 @@ reposRouter.post("/", (req, res) => {
 });
 
 reposRouter.get("/", (_req, res) => {
+  const config = loadConfig();
   const repos = reposRepo.list().map((r) => ({
     ...r,
     openPrCount: prRepo.listForRepo(r.id, "open").length,
+    cloneUrl: repoCloneUrl(config, r.id),
   }));
   res.json(repos);
 });
