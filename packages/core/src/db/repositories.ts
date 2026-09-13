@@ -72,6 +72,11 @@ export const reposRepo = {
   list(): Repo[] {
     return getDb().prepare(`SELECT * FROM repos ORDER BY created_at DESC`).all() as Repo[];
   },
+  /** Cascades to participants, pull_requests, and pr_events via their
+   * ON DELETE CASCADE foreign keys — does not touch the bare repo on disk. */
+  delete(id: string): void {
+    getDb().prepare(`DELETE FROM repos WHERE id = ?`).run(id);
+  },
 };
 
 export const participantsRepo = {

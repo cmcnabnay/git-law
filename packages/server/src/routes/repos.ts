@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   createRepo,
+  deleteRepo,
   reposRepo,
   participantsRepo,
   prRepo,
@@ -49,6 +50,15 @@ reposRouter.get("/:repoId", (req, res) => {
     branches: listBranches(repo.bare_path),
     clonePath: repo.bare_path,
   });
+});
+
+reposRouter.delete("/:repoId", (req, res) => {
+  try {
+    const repo = deleteRepo(req.params.repoId);
+    res.json({ ok: true, deleted: repo });
+  } catch (err) {
+    res.status(404).json({ error: (err as Error).message });
+  }
 });
 
 reposRouter.get("/:repoId/branches", (req, res) => {

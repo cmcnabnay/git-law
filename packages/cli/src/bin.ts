@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { registerInit } from "./commands/init.js";
 import { registerRepoCreate } from "./commands/repoCreate.js";
 import { registerRepoList } from "./commands/repoList.js";
+import { registerRepoDelete } from "./commands/repoDelete.js";
 import { registerParticipantAdd } from "./commands/participantAdd.js";
 import { registerServe } from "./commands/serve.js";
 import { registerRepairHooks } from "./commands/repairHooks.js";
@@ -16,6 +17,7 @@ const participantCmd = program.command("participant").description("Manage repo p
 registerInit(program);
 registerRepoCreate(repoCmd);
 registerRepoList(repoCmd);
+registerRepoDelete(repoCmd);
 registerParticipantAdd(participantCmd);
 registerServe(program);
 registerRepairHooks(program);

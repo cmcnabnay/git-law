@@ -3,7 +3,7 @@ import { Router } from "express";
 import { spawn } from "node:child_process";
 import zlib from "node:zlib";
 import backend from "git-http-backend";
-import { requireBasicAuth, type AuthedRequest } from "../gitAuth.js";
+import { reposRepo } from "@gitlaw/core";
 
 export const gitHttpRouter = Router();
 
@@ -22,9 +22,15 @@ export const gitHttpRouter = Router();
  * `application/json`, and git's requests use
  * `application/x-git-<service>-request`, so the raw body stream is never
  * touched before it gets here.
+ *
+ * No auth gate: anyone who has (or guesses) the repo id can clone/push.
+ * Repo ids are 10-char random nanoids, not sequential/enumerable, but this
+ * is not a substitute for real access control — don't put anything here
+ * that can't tolerate being read/written by anyone who has the URL.
  */
-gitHttpRouter.all("/:repoId.git/*", requireBasicAuth, (req: AuthedRequest<{ repoId: string }>, res) => {
-  const repo = req.repo!;
+gitHttpRouter.all("/:repoId.git/*", (req: import("express").Request<{ repoId: string }>, res) => {
+  const repo = reposRepo.get(req.params.repoId);
+  if (!repo) return res.status(404).end("repo not found\n");
 
   const contentEncoding = req.headers["content-encoding"];
   const reqStream = contentEncoding === "gzip" ? req.pipe(zlib.createGunzip()) : req;

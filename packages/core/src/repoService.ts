@@ -1,4 +1,5 @@
 import { customAlphabet } from "nanoid";
+import fs from "node:fs";
 
 // Alphanumeric only — repo ids end up in filesystem paths, URLs, and (via
 // bareRepoPath) directory names, so avoid characters that are awkward in
@@ -30,6 +31,17 @@ export function createRepo(input: CreateRepoInput): Repo {
     participantsRepo.add({ repoId: repo.id, displayName: p.displayName, email: p.email });
   }
 
+  return repo;
+}
+
+/** Permanently deletes a repo: its DB row (participants, pull requests, and
+ * pr_events cascade via ON DELETE CASCADE) and its bare git repo on disk —
+ * unrecoverable, there is no soft-delete/undo. */
+export function deleteRepo(repoIdOrName: string): Repo {
+  const repo = reposRepo.get(repoIdOrName) ?? reposRepo.findByName(repoIdOrName);
+  if (!repo) throw new Error(`No repo found matching "${repoIdOrName}"`);
+  reposRepo.delete(repo.id);
+  fs.rmSync(repo.bare_path, { recursive: true, force: true });
   return repo;
 }
 
