@@ -1,4 +1,5 @@
 node_modules/
 dist/
 *.log
+nohup.out
 .gitlaw-e2e-home/
