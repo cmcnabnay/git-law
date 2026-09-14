@@ -41,15 +41,15 @@ test("computeRedline keeps unchanged paragraphs intact around a heavily reworded
   const introChunk = unchanged.find((c) => c.value.includes("Intro paragraph"))!;
   assert.equal(introChunk.value.trim(), "Intro paragraph that stays the same across both versions.");
 
-  // The rewritten middle paragraph itself should read as one clean
-  // strikethrough block followed by one clean inserted block, not a
-  // scrambled word-by-word interleaving of the two unrelated sentences.
-  const removed = changes.filter((c) => c.removed);
-  const added = changes.filter((c) => c.added);
-  assert.equal(removed.length, 1);
-  assert.equal(added.length, 1);
-  assert.ok(removed[0].value.includes("subject to any confidentiality obligation"));
-  assert.ok(added[0].value.includes("otherwise reflects, to any degree"));
+  // The rewritten middle paragraph itself should read as a clean
+  // strikethrough block followed by a clean inserted block (each may be
+  // several adjacent clause-level Change objects, which render seamlessly
+  // as one block), not a scrambled word-by-word interleaving of the two
+  // unrelated sentences.
+  const removedText = changes.filter((c) => c.removed).map((c) => c.value).join("");
+  const addedText = changes.filter((c) => c.added).map((c) => c.value).join("");
+  assert.ok(removedText.includes("subject to any confidentiality obligation"));
+  assert.ok(addedText.includes("otherwise reflects, to any degree"));
 });
 
 test("computeRedline diffs at clause granularity, leaving unrelated clauses in the same paragraph untouched", () => {
@@ -122,13 +122,15 @@ test("computeRedline keeps a closing quote with the clause it closes, not the cl
   const newText = 'whether or not marked or designated as "confidential," and all notes, analyses, and summaries.';
 
   const { changes } = computeRedline(oldText, newText);
-  const removed = changes.filter((c) => c.removed).map((c) => c.value);
+  const removedText = changes.filter((c) => c.removed).map((c) => c.value).join("");
 
   // The removed text must start with "that is" — not a stray leading quote
   // torn off the end of the preceding (unchanged) `"confidential,"` clause.
-  assert.equal(removed.length, 1);
-  assert.ok(removed[0].trim().startsWith("that is"), `expected clause to start with "that is", got: ${JSON.stringify(removed[0])}`);
-  assert.ok(!removed[0].includes('"'), `expected no stray quote in removed clause: ${JSON.stringify(removed[0])}`);
+  assert.ok(
+    removedText.trim().startsWith("that is"),
+    `expected removed text to start with "that is", got: ${JSON.stringify(removedText)}`
+  );
+  assert.ok(!removedText.includes('"'), `expected no stray quote in removed text: ${JSON.stringify(removedText)}`);
 });
 
 test("computeRedline reports unchanged/changed/removed paragraph status", () => {
@@ -154,11 +156,13 @@ test("computeRedline reports unchanged/changed/added paragraph status", () => {
 
 test("computeRedline doesn't mismatch renumbered paragraphs after an inserted numbered paragraph", () => {
   // Inserting a whole new numbered paragraph shifts every numbered
-  // paragraph after it on the new side — paragraph 5 becomes paragraph 6,
-  // etc — even though those paragraphs' actual content is unchanged. The
-  // diff must still recognize them as the same paragraph, not treat the
-  // number shift as a content change (which used to cascade into pairing
-  // each paragraph with the wrong neighbor and duplicating text).
+  // paragraph after it on the new side — paragraph 3 becomes paragraph 4 —
+  // even though its actual content is unchanged. The diff must still
+  // recognize it as the same paragraph rather than pairing it with the
+  // wrong neighbor and duplicating text (the original bug) — but a pure
+  // renumbering is still a real, visible change: it must show up as a
+  // struck-through old number replaced by the new one, not be silently
+  // swapped in as if nothing happened (see the next assertions).
   const oldText =
     "1. First paragraph unchanged.\n\n" +
     "2. Second paragraph unchanged.\n\n" +
@@ -171,19 +175,54 @@ test("computeRedline doesn't mismatch renumbered paragraphs after an inserted nu
 
   const { changes, paragraphStatus } = computeRedline(oldText, newText);
 
-  assert.deepEqual(paragraphStatus.old, ["unchanged", "unchanged", "unchanged"]);
-  assert.deepEqual(paragraphStatus.new, ["unchanged", "unchanged", "added", "unchanged"]);
+  assert.deepEqual(paragraphStatus.old, ["unchanged", "unchanged", "changed"]);
+  assert.deepEqual(paragraphStatus.new, ["unchanged", "unchanged", "added", "changed"]);
 
   const added = changes.filter((c) => c.added).map((c) => c.value.trim());
   const removed = changes.filter((c) => c.removed).map((c) => c.value.trim());
-  assert.deepEqual(added, ["3. A brand new inserted paragraph."]);
-  assert.deepEqual(removed, []);
+  assert.deepEqual(added, ["3. A brand new inserted paragraph.", "4"]);
+  assert.deepEqual(removed, ["3"]);
 
   // The renumbered final paragraph must appear exactly once, with its new
   // number, not duplicated or glued onto another paragraph's text.
   const fullText = changes.map((c) => c.value).join("");
   assert.equal(fullText.match(/Third paragraph unchanged\./g)?.length, 1);
-  assert.ok(fullText.includes("4. Third paragraph unchanged."));
+  assert.ok(fullText.includes("Third paragraph unchanged."));
+});
+
+test("computeRedline doesn't join multiple unmatched clauses into one blob before diffing", () => {
+  // A comma inserted mid-sentence on the new side splits what was one old
+  // clause into three new clauses. diffArrays groups all three into a
+  // single chunk's multi-element .value — diffParagraph must pair them up
+  // clause-by-clause against the (single) old clause, not join the whole
+  // run into one string and word-diff that blob, which would let LCS match
+  // words (e.g. "posting of bond") across clauses that aren't actually each
+  // other's counterpart.
+  const oldText =
+    "Discloser shall be entitled to equitable relief without the posting of bond or other security. " +
+    "Recipient waives any claim or defense.";
+  const newText =
+    "Discloser shall be entitled to equitable relief, subject to the court's discretion and to the showing required by law, " +
+    "including as to the posting of bond or other security. " +
+    "Recipient waives any claim or defense.";
+
+  const { changes } = computeRedline(oldText, newText);
+
+  const removed = changes.filter((c) => c.removed).map((c) => c.value.trim());
+  const added = changes.filter((c) => c.added).map((c) => c.value.trim());
+
+  assert.deepEqual(removed, ["without the posting of bond or other security."]);
+  assert.deepEqual(added, [
+    ",",
+    "subject to the court's discretion and to the showing required by law,",
+    "including as to the posting of bond or other security.",
+  ]);
+
+  // "posting of bond or other security" must appear once on each side, not
+  // get matched as unchanged across the two unrelated clauses that both
+  // happen to contain it.
+  const unchangedText = changes.filter((c) => !c.added && !c.removed).map((c) => c.value).join("");
+  assert.ok(!unchangedText.includes("posting of bond"));
 });
 
 test("computeRedline keeps a lightly edited paragraph as a precise word-level diff", () => {

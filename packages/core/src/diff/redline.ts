@@ -106,14 +106,32 @@ function diffParagraph(oldParagraph: string, newParagraph: string): Change[] {
       continue;
     }
 
-    const removedText = (chunk.value as string[]).join("");
-    const next = clauseChanges[i + 1];
-    if (next?.added) {
-      changes.push(...wordDiffOrReplace(removedText, (next.value as string[]).join("")));
-      i += 2;
-    } else {
-      changes.push({ removed: true, value: removedText } as Change);
-      i++;
+    // diffArrays groups every consecutive run of unmatched clauses into one
+    // chunk, whose .value can hold several clauses at once (e.g. one old
+    // clause splitting into three new ones because a comma got inserted
+    // mid-sentence). Pair them up clause-by-clause — the same index-paired
+    // pattern computeRedline's own paragraph-level loop uses — rather than
+    // joining the whole run into one string and word-diffing that: joining
+    // first would feed wordDiffOrReplace a blob spanning multiple unrelated
+    // clauses, letting it match words (e.g. "posting of bond or other
+    // security") across clauses that aren't actually each other's
+    // counterpart, instead of leaving each clause to compare only against
+    // its own positional pair (or stand alone as a clean whole add/remove).
+    const removedClauses = chunk.value as string[];
+    i++;
+    const next = clauseChanges[i];
+    const addedClauses = next?.added ? (next.value as string[]) : [];
+    if (next?.added) i++;
+
+    const pairCount = Math.min(removedClauses.length, addedClauses.length);
+    for (let p = 0; p < pairCount; p++) {
+      changes.push(...wordDiffOrReplace(removedClauses[p], addedClauses[p]));
+    }
+    for (let p = pairCount; p < removedClauses.length; p++) {
+      changes.push({ removed: true, value: removedClauses[p] } as Change);
+    }
+    for (let p = pairCount; p < addedClauses.length; p++) {
+      changes.push({ added: true, value: addedClauses[p] } as Change);
     }
   }
   return changes;
@@ -187,12 +205,33 @@ export function computeRedline(oldText: string, newText: string): RedlineDiff {
       // with nothing removed at this position — diffArrays reports both the
       // same way (removed: falsy), so chunk.added decides which this is.
       for (const para of chunk.value as string[]) {
-        record({ value: withTrailingBreak(para), added: !!chunk.added, removed: false } as Change);
         if (chunk.added) {
+          record({ value: withTrailingBreak(para), added: true, removed: false } as Change);
           newStatus.push("added");
-        } else {
+          continue;
+        }
+
+        // A "matched" pair only means the comparator's stripped-of-number
+        // content is equal — the two can still differ in their actual
+        // number (see stripParagraphNumber), which counts as a real,
+        // visible change: without this check, a paragraph renumbered by an
+        // insertion or deletion elsewhere would silently show its new
+        // number with no indication anything changed, while a paragraph
+        // whose content *also* happened to change would (its number is
+        // itself the first "clause" diffParagraph sees) — inconsistent.
+        const oldPara = oldParagraphs[oldStatus.length];
+        if (oldPara === para) {
+          record({ value: withTrailingBreak(para), added: false, removed: false } as Change);
           oldStatus.push("unchanged");
           newStatus.push("unchanged");
+        } else {
+          const paraChanges = diffParagraph(oldPara, para);
+          paraChanges.forEach((c, idx) => {
+            const isLast = idx === paraChanges.length - 1;
+            record({ ...c, value: isLast ? withTrailingBreak(c.value) : c.value } as Change);
+          });
+          oldStatus.push("changed");
+          newStatus.push("changed");
         }
       }
       i++;
