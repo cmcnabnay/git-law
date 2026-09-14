@@ -137,8 +137,14 @@ export async function syncFromRemote(fs: FsaFs): Promise<{ created: string[] }> 
 }
 
 /** `git checkout -b <newBranch> <fromBranch>`. */
+/** Creates `newBranch` at `fromBranch`'s commit and checks it out. `git.branch`'s
+ * own `checkout` option only repoints the `HEAD` ref — it never writes the
+ * target commit's files into the working directory or index (that's what
+ * `git.checkout` does), so without the explicit checkout below the working
+ * tree is silently left showing whatever branch was checked out before. */
 export async function createBranch(fs: FsaFs, newBranch: string, fromBranch: string): Promise<void> {
-  await git.branch({ fs, dir: DIR, ref: newBranch, object: fromBranch, checkout: true });
+  await git.branch({ fs, dir: DIR, ref: newBranch, object: fromBranch, checkout: false });
+  await git.checkout({ fs, dir: DIR, ref: newBranch, force: false });
 }
 
 export async function listFilesAtRef(fs: FsaFs, ref: string): Promise<LocalFileEntry[]> {
