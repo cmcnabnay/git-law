@@ -11,7 +11,6 @@ export interface Repo {
   name: string;
   bare_path: string;
   default_branch: string;
-  local_path: string | null;
   created_at: string;
 }
 
@@ -78,13 +77,6 @@ export const reposRepo = {
    * ON DELETE CASCADE foreign keys — does not touch the bare repo on disk. */
   delete(id: string): void {
     getDb().prepare(`DELETE FROM repos WHERE id = ?`).run(id);
-  },
-  /** Points this repo at a working-directory clone on the machine running
-   * the Git Law server, for the Local tab's add/commit/push/sync/branch
-   * operations. Pass null to unlink. */
-  setLocalPath(id: string, localPath: string | null): Repo {
-    getDb().prepare(`UPDATE repos SET local_path = ? WHERE id = ?`).run(localPath, id);
-    return reposRepo.get(id)!;
   },
 };
 

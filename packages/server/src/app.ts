@@ -4,7 +4,6 @@ import { reposRouter } from "./routes/repos.js";
 import { prsRouter } from "./routes/prs.js";
 import { hookNotifyRouter } from "./routes/hookNotify.js";
 import { gitHttpRouter } from "./routes/gitHttp.js";
-import { localRepoRouter } from "./routes/localRepo.js";
 
 export function createApp() {
   const app = express();
@@ -20,7 +19,6 @@ export function createApp() {
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
   app.use("/api/repos/:repoId/prs", prsRouter);
-  app.use("/api/repos/:repoId/local", localRepoRouter);
   app.use("/api/repos/:repoId/hook-notify", hookNotifyRouter);
   app.use("/api/repos", reposRouter);
 

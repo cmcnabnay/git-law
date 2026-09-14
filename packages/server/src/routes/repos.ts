@@ -57,23 +57,6 @@ reposRouter.get("/:repoId", (req, res) => {
   });
 });
 
-reposRouter.patch("/:repoId", (req, res) => {
-  const repo = reposRepo.get(req.params.repoId);
-  if (!repo) return res.status(404).json({ error: "repo not found" });
-  const { localPath } = req.body ?? {};
-  if (localPath !== undefined && localPath !== null && typeof localPath !== "string") {
-    return res.status(400).json({ error: "localPath must be a string" });
-  }
-  const updated = reposRepo.setLocalPath(repo.id, localPath || null);
-  res.json({
-    ...updated,
-    participants: participantsRepo.listForRepo(updated.id),
-    branches: listBranches(updated.bare_path),
-    clonePath: updated.bare_path,
-    cloneUrl: repoCloneUrl(loadConfig(), updated.id),
-  });
-});
-
 reposRouter.delete("/:repoId", (req, res) => {
   try {
     const repo = deleteRepo(req.params.repoId);

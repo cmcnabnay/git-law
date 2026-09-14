@@ -21,11 +21,6 @@ function migrate(database: Database.Database): void {
   if (!prColumns.some((c) => c.name === "base_branch")) {
     database.exec(`ALTER TABLE pull_requests ADD COLUMN base_branch TEXT`);
   }
-
-  const repoColumns = database.prepare(`PRAGMA table_info(repos)`).all() as { name: string }[];
-  if (!repoColumns.some((c) => c.name === "local_path")) {
-    database.exec(`ALTER TABLE repos ADD COLUMN local_path TEXT`);
-  }
 }
 
 export function getDb(): Database.Database {

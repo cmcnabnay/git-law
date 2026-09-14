@@ -7,7 +7,6 @@ export * from "./git/paths.js";
 export * from "./git/bareRepo.js";
 export * from "./git/show.js";
 export * from "./git/branches.js";
-export * from "./git/localRepo.js";
 export * from "./git/changedFiles.js";
 export * from "./git/tree.js";
 export * from "./git/merge.js";

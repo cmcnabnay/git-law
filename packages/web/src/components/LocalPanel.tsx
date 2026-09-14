@@ -1,14 +1,39 @@
 import { useEffect, useState } from "react";
-import { api, type Repo, type LocalStatus, type TreeEntry } from "../api/client.js";
-import { formatBytes, timeAgo } from "../format.js";
+import type { Repo } from "../api/client.js";
+import { formatBytes } from "../format.js";
+import { FsaFs } from "../local/fsaFs.js";
+import {
+  saveDirHandle,
+  loadDirHandle,
+  clearDirHandle,
+  queryReadWritePermission,
+  requestReadWritePermission,
+} from "../local/handleStore.js";
+import {
+  isGitWorkingRepo,
+  getStatus,
+  checkoutBranch,
+  addAndCommitAll,
+  pushBranch,
+  syncFromRemote,
+  createBranch,
+  listFilesAtRef,
+  type LocalStatus,
+  type LocalFileEntry,
+} from "../local/localGit.js";
 
-export function LocalPanel({ repo, onRepoUpdate }: { repo: Repo; onRepoUpdate: (r: Repo) => void }) {
-  const [status, setStatus] = useState<LocalStatus | null>(null);
+type Phase = "checking" | "no-handle" | "needs-permission" | "not-a-repo" | "ready";
+
+const SUPPORTED = typeof window !== "undefined" && "showDirectoryPicker" in window;
+
+export function LocalPanel({ repo }: { repo: Repo }) {
+  const [phase, setPhase] = useState<Phase>("checking");
+  const [handle, setHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [permission, setPermission] = useState<PermissionState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pathInput, setPathInput] = useState(repo.local_path ?? "");
-  const [linking, setLinking] = useState(false);
 
-  const [tree, setTree] = useState<TreeEntry[]>([]);
+  const [status, setStatus] = useState<LocalStatus | null>(null);
+  const [tree, setTree] = useState<LocalFileEntry[]>([]);
   const [treeError, setTreeError] = useState<string | null>(null);
 
   const [commitMessage, setCommitMessage] = useState("");
@@ -19,55 +44,108 @@ export function LocalPanel({ repo, onRepoUpdate }: { repo: Repo; onRepoUpdate: (
   const [newBranchName, setNewBranchName] = useState("");
   const [newBranchFrom, setNewBranchFrom] = useState("");
 
-  function loadStatus() {
+  async function init() {
     setError(null);
-    api
-      .getLocalStatus(repo.id)
-      .then(setStatus)
-      .catch((e) => setError(e.message));
-  }
-
-  useEffect(loadStatus, [repo.id]);
-
-  useEffect(() => {
-    if (!status?.valid || !status.currentBranch) {
-      setTree([]);
+    const stored = await loadDirHandle(repo.id);
+    if (!stored) {
+      setPhase("no-handle");
       return;
     }
-    setTreeError(null);
-    api
-      .getLocalTree(repo.id, status.currentBranch)
-      .then(setTree)
-      .catch((e) => setTreeError(e.message));
-  }, [repo.id, status?.valid, status?.currentBranch]);
+    setHandle(stored);
+    const perm = await queryReadWritePermission(stored);
+    setPermission(perm);
+    if (perm !== "granted") {
+      setPhase("needs-permission");
+      return;
+    }
+    await afterGranted(stored);
+  }
+
+  useEffect(() => {
+    if (SUPPORTED) init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo.id]);
+
+  async function afterGranted(dirHandle: FileSystemDirectoryHandle) {
+    const isRepo = await isGitWorkingRepo(dirHandle);
+    if (!isRepo) {
+      setPhase("not-a-repo");
+      return;
+    }
+    setPhase("ready");
+    await refreshStatus(dirHandle);
+  }
+
+  async function refreshStatus(dirHandle: FileSystemDirectoryHandle) {
+    setError(null);
+    try {
+      const fs = new FsaFs(dirHandle);
+      const s = await getStatus(fs);
+      setStatus(s);
+      if (s.currentBranch) {
+        setTreeError(null);
+        try {
+          setTree(await listFilesAtRef(fs, s.currentBranch));
+        } catch (e: any) {
+          setTreeError(e.message);
+        }
+      } else {
+        setTree([]);
+      }
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
 
   useEffect(() => {
     if (status?.branches?.length && !newBranchFrom) {
       setNewBranchFrom(status.currentBranch ?? status.branches[0].name);
     }
-  }, [status]);
+  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleLink(e: React.FormEvent) {
-    e.preventDefault();
-    if (!pathInput.trim()) return;
-    setLinking(true);
+  async function handleChooseFolder() {
     setError(null);
     try {
-      const updated = await api.setLocalPath(repo.id, pathInput.trim());
-      onRepoUpdate(updated);
-      loadStatus();
+      const picked = await window.showDirectoryPicker({ mode: "readwrite" });
+      await saveDirHandle(repo.id, picked);
+      setHandle(picked);
+      setPermission("granted");
+      await afterGranted(picked);
     } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLinking(false);
+      if (e?.name !== "AbortError") setError(e.message);
     }
   }
 
+  async function handleGrantAccess() {
+    if (!handle) return;
+    setError(null);
+    try {
+      const perm = await requestReadWritePermission(handle);
+      setPermission(perm);
+      if (perm === "granted") await afterGranted(handle);
+      else setError("Access was not granted — the Local tab can't read or write this folder without it.");
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function handleForget() {
+    await clearDirHandle(repo.id);
+    setHandle(null);
+    setPermission(null);
+    setStatus(null);
+    setTree([]);
+    setPhase("no-handle");
+  }
+
   async function handleCheckout(branch: string) {
+    if (!handle) return;
     setBusy("checkout");
     setError(null);
     try {
-      setStatus(await api.checkoutLocalBranch(repo.id, branch));
+      const fs = new FsaFs(handle);
+      await checkoutBranch(fs, branch);
+      await refreshStatus(handle);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -76,12 +154,14 @@ export function LocalPanel({ repo, onRepoUpdate }: { repo: Repo; onRepoUpdate: (
   }
 
   async function handleCommit() {
-    if (!commitMessage.trim()) return;
+    if (!handle || !commitMessage.trim()) return;
     setBusy("commit");
     setError(null);
     try {
-      setStatus(await api.commitLocal(repo.id, commitMessage.trim()));
+      const fs = new FsaFs(handle);
+      await addAndCommitAll(fs, commitMessage.trim());
       setCommitMessage("");
+      await refreshStatus(handle);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -90,11 +170,13 @@ export function LocalPanel({ repo, onRepoUpdate }: { repo: Repo; onRepoUpdate: (
   }
 
   async function handlePush() {
-    if (!status?.currentBranch) return;
+    if (!handle || !status?.currentBranch) return;
     setBusy("push");
     setError(null);
     try {
-      setStatus(await api.pushLocal(repo.id, status.currentBranch));
+      const fs = new FsaFs(handle);
+      await pushBranch(fs, status.currentBranch);
+      await refreshStatus(handle);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -103,17 +185,19 @@ export function LocalPanel({ repo, onRepoUpdate }: { repo: Repo; onRepoUpdate: (
   }
 
   async function handleSync() {
+    if (!handle) return;
     setBusy("sync");
     setError(null);
     setSyncMsg(null);
     try {
-      const result = await api.syncLocal(repo.id);
-      setStatus(result);
+      const fs = new FsaFs(handle);
+      const { created } = await syncFromRemote(fs);
       setSyncMsg(
-        result.created.length > 0
-          ? `Pulled down ${result.created.length} new branch${result.created.length === 1 ? "" : "es"}: ${result.created.join(", ")}`
+        created.length > 0
+          ? `Pulled down ${created.length} new branch${created.length === 1 ? "" : "es"}: ${created.join(", ")}`
           : "Already up to date — no new remote branches."
       );
+      await refreshStatus(handle);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -123,13 +207,15 @@ export function LocalPanel({ repo, onRepoUpdate }: { repo: Repo; onRepoUpdate: (
 
   async function handleCreateBranch(e: React.FormEvent) {
     e.preventDefault();
-    if (!newBranchName.trim() || !newBranchFrom) return;
+    if (!handle || !newBranchName.trim() || !newBranchFrom) return;
     setBusy("branch");
     setError(null);
     try {
-      setStatus(await api.createLocalBranch(repo.id, newBranchName.trim(), newBranchFrom));
+      const fs = new FsaFs(handle);
+      await createBranch(fs, newBranchName.trim(), newBranchFrom);
       setNewBranchName("");
       setShowCreateBranch(false);
+      await refreshStatus(handle);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -137,28 +223,70 @@ export function LocalPanel({ repo, onRepoUpdate }: { repo: Repo; onRepoUpdate: (
     }
   }
 
-  if (!status) return <p>Loading...</p>;
-
-  if (!status.linked || !status.valid) {
+  if (!SUPPORTED) {
     return (
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>{status.linked ? "Local clone not found" : "Link a local clone"}</h3>
-        {status.linked && status.error && <p style={{ color: "var(--danger)" }}>{status.error}</p>}
+        <h3 style={{ marginTop: 0, color: "var(--danger)" }}>Not supported in this browser</h3>
         <p style={{ color: "var(--muted)", fontSize: 13 }}>
-          Enter the absolute path to a clone of this repo on the machine running the Git Law server. Once linked,
-          you can add &amp; commit, push, sync new branches, and create branches from here.
+          The Local tab uses the File System Access API to read and write a real folder on your machine, which is
+          currently only available in Chromium-based browsers (Chrome, Edge). Use the Remote tab instead, or reopen
+          this page in Chrome/Edge.
         </p>
-        <form onSubmit={handleLink} style={{ display: "flex", gap: 8 }}>
-          <input
-            value={pathInput}
-            onChange={(e) => setPathInput(e.target.value)}
-            placeholder="/home/you/repos/my-repo"
-            className="mono"
-          />
-          <button className="primary" disabled={linking || !pathInput.trim()}>
-            {linking ? "Linking…" : status.linked ? "Update path" : "Link"}
+      </div>
+    );
+  }
+
+  if (phase === "checking") return <p>Loading...</p>;
+
+  if (phase === "no-handle") {
+    return (
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Link a local clone</h3>
+        <p style={{ color: "var(--muted)", fontSize: 13 }}>
+          Choose the folder on this machine where you've cloned this repo. Everything below then runs against that
+          real folder — real commits, real branches, real pushes — using your browser's own file access, no install
+          required.
+        </p>
+        <button className="primary" onClick={handleChooseFolder}>
+          Choose folder…
+        </button>
+        {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
+      </div>
+    );
+  }
+
+  if (phase === "needs-permission") {
+    return (
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Reconnect to {handle?.name}</h3>
+        <p style={{ color: "var(--muted)", fontSize: 13 }}>
+          Your browser needs you to re-confirm access to this folder{permission === "denied" ? " (access was denied)" : ""}.
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="primary" onClick={handleGrantAccess}>
+            Grant access
           </button>
-        </form>
+          <button onClick={handleForget}>Choose a different folder</button>
+        </div>
+        {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
+      </div>
+    );
+  }
+
+  if (phase === "not-a-repo") {
+    return (
+      <div className="card">
+        <h3 style={{ marginTop: 0, color: "var(--danger)" }}>Not a git repo</h3>
+        <p style={{ color: "var(--danger)" }}>"{handle?.name}" doesn't have a .git folder in it.</p>
+        <button onClick={handleForget}>Choose a different folder</button>
+      </div>
+    );
+  }
+
+  if (!status) {
+    return (
+      <div>
+        <p>Loading...</p>
         {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
       </div>
     );
@@ -176,7 +304,7 @@ export function LocalPanel({ repo, onRepoUpdate }: { repo: Repo; onRepoUpdate: (
             ))}
           </select>
           <span style={{ color: "var(--muted)", fontSize: 13 }}>
-            {status.dirty ? "uncommitted changes" : "clean"} · <span className="mono">{status.localPath}</span>
+            {status.dirty ? "uncommitted changes" : "clean"} · <span className="mono">{handle?.name}</span>
           </span>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -185,6 +313,9 @@ export function LocalPanel({ repo, onRepoUpdate }: { repo: Repo; onRepoUpdate: (
           </button>
           <button onClick={() => setShowCreateBranch((v) => !v)} disabled={busy !== null}>
             Create branch
+          </button>
+          <button onClick={handleForget} disabled={busy !== null}>
+            Unlink
           </button>
         </div>
       </div>
@@ -247,10 +378,7 @@ export function LocalPanel({ repo, onRepoUpdate }: { repo: Repo; onRepoUpdate: (
           <div className="repo-row" key={entry.path}>
             <div>
               <span className="mono">{entry.path}</span>
-              <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                {entry.lastCommitMessage || "—"}
-                {entry.lastCommitDate && ` · ${timeAgo(entry.lastCommitDate)}`} · {formatBytes(entry.size)}
-              </div>
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>{formatBytes(entry.size)}</div>
             </div>
           </div>
         ))}

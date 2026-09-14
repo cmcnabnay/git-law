@@ -3,7 +3,6 @@ export interface Repo {
   name: string;
   bare_path: string;
   default_branch: string;
-  local_path: string | null;
   created_at: string;
   openPrCount?: number;
   participants?: Participant[];
@@ -84,24 +83,6 @@ export interface TreeEntry {
   lastCommitDate: string;
 }
 
-export interface LocalBranchInfo {
-  name: string;
-  isCurrent: boolean;
-  headSha: string;
-  lastCommitMessage: string;
-  lastCommitDate: string;
-}
-
-export interface LocalStatus {
-  linked: boolean;
-  localPath: string | null;
-  valid: boolean;
-  error?: string;
-  currentBranch: string | null;
-  dirty: boolean;
-  branches: LocalBranchInfo[];
-}
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -120,8 +101,6 @@ export const api = {
     request<Repo>("/repos", { method: "POST", body: JSON.stringify({ name, participants }) }),
   getRepo: (repoId: string) => request<Repo>(`/repos/${repoId}`),
   deleteRepo: (repoId: string) => request<{ ok: true; deleted: Repo }>(`/repos/${repoId}`, { method: "DELETE" }),
-  setLocalPath: (repoId: string, localPath: string) =>
-    request<Repo>(`/repos/${repoId}`, { method: "PATCH", body: JSON.stringify({ localPath }) }),
   getTree: (repoId: string, ref: string) =>
     request<TreeEntry[]>(`/repos/${repoId}/tree?ref=${encodeURIComponent(ref)}`),
   getPreview: (repoId: string, rev: string, path: string) =>
@@ -150,18 +129,4 @@ export const api = {
     }),
   blobUrl: (repoId: string, rev: string, path: string) =>
     `/api/repos/${repoId}/blob?rev=${encodeURIComponent(rev)}&path=${encodeURIComponent(path)}`,
-
-  getLocalStatus: (repoId: string) => request<LocalStatus>(`/repos/${repoId}/local`),
-  getLocalTree: (repoId: string, branch: string) =>
-    request<TreeEntry[]>(`/repos/${repoId}/local/tree?branch=${encodeURIComponent(branch)}`),
-  checkoutLocalBranch: (repoId: string, branch: string) =>
-    request<LocalStatus>(`/repos/${repoId}/local/checkout`, { method: "POST", body: JSON.stringify({ branch }) }),
-  commitLocal: (repoId: string, message: string) =>
-    request<LocalStatus>(`/repos/${repoId}/local/commit`, { method: "POST", body: JSON.stringify({ message }) }),
-  pushLocal: (repoId: string, branch: string) =>
-    request<LocalStatus>(`/repos/${repoId}/local/push`, { method: "POST", body: JSON.stringify({ branch }) }),
-  syncLocal: (repoId: string) =>
-    request<LocalStatus & { created: string[] }>(`/repos/${repoId}/local/sync`, { method: "POST" }),
-  createLocalBranch: (repoId: string, name: string, from: string) =>
-    request<LocalStatus>(`/repos/${repoId}/local/branches`, { method: "POST", body: JSON.stringify({ name, from }) }),
 };

@@ -125,11 +125,11 @@ export function RepoDetailPage() {
   return (
     <div>
       <div className="tabs repo-tabs">
-        <button className={tab === "local" ? "active" : ""} onClick={() => setTab("local")}>
-          Local
-        </button>
         <button className={tab === "remote" ? "active" : ""} onClick={() => setTab("remote")}>
           Remote
+        </button>
+        <button className={tab === "local" ? "active" : ""} onClick={() => setTab("local")}>
+          Local
         </button>
         <button className={tab === "prs" ? "active" : ""} onClick={() => setTab("prs")}>
           Pull requests{prs.length > 0 ? ` (${prs.length})` : ""}
@@ -139,7 +139,7 @@ export function RepoDetailPage() {
         </button>
       </div>
 
-      {tab === "local" && <LocalPanel repo={repo} onRepoUpdate={setRepo} />}
+      {tab === "local" && <LocalPanel repo={repo} />}
 
       {tab === "remote" && (
         <div>
