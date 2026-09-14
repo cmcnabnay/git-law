@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS repos (
   name           TEXT NOT NULL,
   bare_path      TEXT NOT NULL UNIQUE,
   default_branch TEXT NOT NULL DEFAULT 'main',
+  local_path     TEXT,
   created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

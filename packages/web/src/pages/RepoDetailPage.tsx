@@ -2,36 +2,13 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Repo, type PullRequest, type TreeEntry } from "../api/client.js";
 import { useSetRepoHeaderName } from "../context/repoHeader.js";
+import { formatBytes, timeAgo } from "../format.js";
+import { LocalPanel } from "../components/LocalPanel.js";
 
-type Tab = "files" | "prs" | "settings";
+type Tab = "local" | "remote" | "prs" | "settings";
 
 function StatusBadge({ status }: { status: PullRequest["status"] }) {
   return <span className={`badge ${status}`}>{status}</span>;
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  return `${(n / 1024).toFixed(1)} KB`;
-}
-
-function timeAgo(iso: string): string {
-  if (!iso) return "";
-  const diffSec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-  const plural = (n: number) => (Math.floor(n) === 1 ? "" : "s");
-  const mins = diffSec / 60;
-  const hours = mins / 60;
-  const days = hours / 24;
-  const weeks = days / 7;
-  const months = days / 30.44;
-  const years = days / 365.25;
-
-  if (diffSec < 60) return `${Math.floor(diffSec)} second${plural(diffSec)} ago`;
-  if (mins < 60) return `${Math.floor(mins)} minute${plural(mins)} ago`;
-  if (hours < 24) return `${Math.floor(hours)} hour${plural(hours)} ago`;
-  if (days < 7) return `${Math.floor(days)} day${plural(days)} ago`;
-  if (weeks < 4.345) return `${Math.floor(weeks)} week${plural(weeks)} ago`;
-  if (months < 12) return `${Math.floor(months)} month${plural(months)} ago`;
-  return `${Math.floor(years)} year${plural(years)} ago`;
 }
 
 function FileRow({ repo, refName, entry }: { repo: Repo; refName: string; entry: TreeEntry }) {
@@ -96,7 +73,7 @@ export function RepoDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [tab, setTab] = useState<Tab>("files");
+  const [tab, setTab] = useState<Tab>("remote");
   const [showClone, setShowClone] = useState(false);
 
   function load() {
@@ -148,8 +125,11 @@ export function RepoDetailPage() {
   return (
     <div>
       <div className="tabs repo-tabs">
-        <button className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
-          Files
+        <button className={tab === "local" ? "active" : ""} onClick={() => setTab("local")}>
+          Local
+        </button>
+        <button className={tab === "remote" ? "active" : ""} onClick={() => setTab("remote")}>
+          Remote
         </button>
         <button className={tab === "prs" ? "active" : ""} onClick={() => setTab("prs")}>
           Pull requests{prs.length > 0 ? ` (${prs.length})` : ""}
@@ -159,7 +139,9 @@ export function RepoDetailPage() {
         </button>
       </div>
 
-      {tab === "files" && (
+      {tab === "local" && <LocalPanel repo={repo} onRepoUpdate={setRepo} />}
+
+      {tab === "remote" && (
         <div>
           <div className="repo-toolbar">
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
