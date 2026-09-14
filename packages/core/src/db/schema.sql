@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS pull_requests (
   target_branch TEXT NOT NULL DEFAULT 'main',
   status        TEXT NOT NULL DEFAULT 'open',
   title         TEXT,
+  base_branch   TEXT,
   author_email  TEXT,
   turn_email    TEXT,
   head_sha      TEXT NOT NULL,

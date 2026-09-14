@@ -35,6 +35,7 @@ export interface PullRequest {
   branch: string;
   target_branch: string;
   status: PrStatus;
+  base_branch: string | null;
   author_email: string | null;
   turn_email: string | null;
   head_sha: string;

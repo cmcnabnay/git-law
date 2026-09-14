@@ -87,6 +87,34 @@ test("deleting a branch that never had a PR is a no-op", () => {
   assert.equal(prRepo.listForRepo(repo.id).length, 0);
 });
 
+test("a branch stacked on another branch diffs against that branch, not main", () => {
+  const repo = createRepo({ name: "test-repo-6" });
+  seedMain(repo.bare_path);
+
+  const mainSha = execFileSync("git", ["-C", repo.bare_path, "rev-parse", "main"], { encoding: "utf8" }).trim();
+
+  const buyersSha = execFileSync(
+    "git",
+    ["-C", repo.bare_path, "commit-tree", EMPTY_TREE_SHA, "-p", mainSha, "-m", "buyers edit"],
+    { encoding: "utf8" }
+  ).trim();
+  execFileSync("git", ["-C", repo.bare_path, "update-ref", "refs/heads/buyers_changes_1", buyersSha]);
+  const buyersPr = createOrUpdatePr(repo.id, "buyers_changes_1", buyersSha)!;
+  assert.equal(buyersPr.base_sha, mainSha, "first branch off main diffs against main");
+  assert.equal(buyersPr.base_branch, "main");
+
+  const sellersSha = execFileSync(
+    "git",
+    ["-C", repo.bare_path, "commit-tree", EMPTY_TREE_SHA, "-p", buyersSha, "-m", "sellers edit"],
+    { encoding: "utf8" }
+  ).trim();
+  execFileSync("git", ["-C", repo.bare_path, "update-ref", "refs/heads/sellers_changes_1", sellersSha]);
+  const sellersPr = createOrUpdatePr(repo.id, "sellers_changes_1", sellersSha)!;
+  assert.equal(sellersPr.base_sha, buyersSha, "branch stacked on buyers_changes_1 diffs against it, not main");
+  assert.equal(sellersPr.base_branch, "buyers_changes_1");
+  assert.equal(sellersPr.target_branch, "main", "still merges into main regardless of diff base");
+});
+
 test("push to the default branch never creates a PR", () => {
   const repo = createRepo({ name: "test-repo-3" });
   const result = createOrUpdatePr(repo.id, repo.default_branch, "e".repeat(40));

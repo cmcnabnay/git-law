@@ -16,6 +16,11 @@ function migrate(database: Database.Database): void {
   if (!participantColumns.some((c) => c.name === "password_hash")) {
     database.exec(`ALTER TABLE participants ADD COLUMN password_hash TEXT`);
   }
+
+  const prColumns = database.prepare(`PRAGMA table_info(pull_requests)`).all() as { name: string }[];
+  if (!prColumns.some((c) => c.name === "base_branch")) {
+    database.exec(`ALTER TABLE pull_requests ADD COLUMN base_branch TEXT`);
+  }
 }
 
 export function getDb(): Database.Database {

@@ -34,6 +34,7 @@ export interface PullRequest {
   target_branch: string;
   status: PrStatus;
   title: string | null;
+  base_branch: string | null;
   author_email: string | null;
   turn_email: string | null;
   head_sha: string;
@@ -167,6 +168,7 @@ export const prRepo = {
     targetBranch: string;
     headSha: string;
     baseSha: string;
+    baseBranch: string | null;
     authorEmail: string | null;
     turnEmail: string | null;
   }): PullRequest {
@@ -174,10 +176,20 @@ export const prRepo = {
     getDb()
       .prepare(
         `INSERT INTO pull_requests
-           (id, repo_id, branch, target_branch, status, author_email, turn_email, head_sha, base_sha)
-         VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?)`
+           (id, repo_id, branch, target_branch, status, author_email, turn_email, head_sha, base_sha, base_branch)
+         VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`
       )
-      .run(id, input.repoId, input.branch, input.targetBranch, input.authorEmail, input.turnEmail, input.headSha, input.baseSha);
+      .run(
+        id,
+        input.repoId,
+        input.branch,
+        input.targetBranch,
+        input.authorEmail,
+        input.turnEmail,
+        input.headSha,
+        input.baseSha,
+        input.baseBranch
+      );
     return prRepo.get(id)!;
   },
   updateHeadSha(id: string, headSha: string): void {

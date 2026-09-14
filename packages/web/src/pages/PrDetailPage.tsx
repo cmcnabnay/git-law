@@ -119,6 +119,7 @@ export function PrDetailPage() {
       <span style={{ color: "var(--muted)", fontSize: 13 }}>
         opened by {pr.author_email ?? "unknown"}
         {pr.turn_email && pr.status === "open" ? ` · waiting on ${pr.turn_email}` : ""}
+        {pr.base_branch && pr.base_branch !== pr.target_branch ? ` · comparing against ${pr.base_branch}` : ""}
       </span>
 
       <div className="card">

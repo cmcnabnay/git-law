@@ -1,6 +1,6 @@
 import { reposRepo, prRepo, eventsRepo, type PullRequest } from "../db/repositories.js";
 import { commitAuthorEmail } from "../git/bareRepo.js";
-import { branchHeadSha } from "../git/branches.js";
+import { detectParentBranch } from "../git/branches.js";
 import { mergeBranchIntoMain } from "../git/merge.js";
 import { nextTurnAfterPush } from "./turnLogic.js";
 
@@ -50,13 +50,14 @@ export function createOrUpdatePr(repoId: string, branch: string, newSha: string)
     return prRepo.get(existing.id)!;
   }
 
-  const baseSha = branchHeadSha(repo.bare_path, repo.default_branch);
+  const parent = detectParentBranch(repo.bare_path, branch, newSha, repo.default_branch);
   const pr = prRepo.create({
     repoId,
     branch,
     targetBranch: repo.default_branch,
     headSha: newSha,
-    baseSha,
+    baseSha: parent.sha,
+    baseBranch: parent.branch,
     authorEmail,
     turnEmail: nextTurnAfterPush(repoId, authorEmail),
   });

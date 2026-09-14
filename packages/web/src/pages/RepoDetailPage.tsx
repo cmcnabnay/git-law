@@ -201,6 +201,7 @@ export function RepoDetailPage() {
               <div style={{ color: "var(--muted)", fontSize: 13 }}>
                 by {pr.author_email ?? "unknown"}
                 {pr.turn_email && pr.status === "open" ? ` · waiting on ${pr.turn_email}` : ""}
+                {pr.base_branch && pr.base_branch !== pr.target_branch ? ` · vs ${pr.base_branch}` : ""}
               </div>
             </div>
             <StatusBadge status={pr.status} />
