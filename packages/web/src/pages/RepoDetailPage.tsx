@@ -41,8 +41,19 @@ function ClonePopover({ repo, onClose }: { repo: Repo; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const cloneUrl = repo.cloneUrl ?? repo.clonePath ?? repo.bare_path;
 
+  const otherBranches = (repo.branches ?? [])
+    .map((b) => b.name)
+    .filter((name) => name !== repo.default_branch);
+
+  const cloneCommand = [
+    `git clone ${cloneUrl} ${repo.name}`,
+    `cd ${repo.name}`,
+    ...otherBranches.map((name) => `git checkout ${name}`),
+    ...(otherBranches.length > 0 ? [`git checkout ${repo.default_branch}`] : []),
+  ].join("\n");
+
   function handleCopy() {
-    navigator.clipboard.writeText(cloneUrl).then(() => {
+    navigator.clipboard.writeText(cloneCommand).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -53,11 +64,16 @@ function ClonePopover({ repo, onClose }: { repo: Repo; onClose: () => void }) {
       <div className="popover-backdrop" onClick={onClose} />
       <div className="popover clone-popover">
         <strong>Clone</strong>
-        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-          <input readOnly className="mono" value={cloneUrl} onFocus={(e) => e.target.select()} />
+        <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "start" }}>
+          <pre className="mono clone-cmd" style={{ margin: 0, flex: 1 }}>
+            {cloneCommand}
+          </pre>
           <button onClick={handleCopy}>{copied ? "Copied!" : "Copy"}</button>
         </div>
-        <p style={{ color: "var(--muted)", fontSize: 12, marginBottom: 0, marginTop: 8 }}>Clone using the web URL.</p>
+        <p style={{ color: "var(--muted)", fontSize: 12, marginBottom: 0, marginTop: 8 }}>
+          Run this command in your terminal to clone the repo into a{" "}
+          <span className="mono">{repo.name}</span> folder with every branch checked out locally.
+        </p>
       </div>
     </>
   );
