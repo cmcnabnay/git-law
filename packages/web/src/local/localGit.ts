@@ -19,6 +19,7 @@ export interface LocalStatus {
 export interface LocalFileEntry {
   path: string;
   size: number;
+  mtimeMs: number;
 }
 
 const DIR = "/";
@@ -179,17 +180,25 @@ export async function createBranch(fs: FsaFs, newBranch: string, fromBranch: str
   await git.checkout({ fs, dir: DIR, ref: newBranch, force: false });
 }
 
-export async function listFilesAtRef(fs: FsaFs, ref: string): Promise<LocalFileEntry[]> {
-  const paths = await git.listFiles({ fs, dir: DIR, ref });
-  const commitOid = await git.resolveRef({ fs, dir: DIR, ref });
-  const entries: LocalFileEntry[] = [];
-  for (const filepath of paths) {
-    try {
-      const { blob } = await git.readBlob({ fs, dir: DIR, oid: commitOid, filepath });
-      entries.push({ path: filepath, size: blob.length });
-    } catch {
-      entries.push({ path: filepath, size: 0 });
+/** Lists the real files sitting in the working directory right now (not
+ * what's committed at some ref) — size and mtime come straight from the
+ * File System Access handle, so this reflects unsaved edits made outside
+ * the app (e.g. in Word) just as accurately as a real file manager would. */
+export async function listWorkingFiles(fs: FsaFs): Promise<LocalFileEntry[]> {
+  async function walk(dir: string): Promise<LocalFileEntry[]> {
+    const names = await fs.promises.readdir(dir);
+    const out: LocalFileEntry[] = [];
+    for (const name of names) {
+      if (dir === "" && name === ".git") continue;
+      const full = dir === "" ? name : `${dir}/${name}`;
+      const stat = await fs.promises.stat(full);
+      if (stat.isDirectory()) {
+        out.push(...(await walk(full)));
+      } else {
+        out.push({ path: full, size: stat.size, mtimeMs: stat.mtimeMs });
+      }
     }
+    return out;
   }
-  return entries;
+  return walk("");
 }

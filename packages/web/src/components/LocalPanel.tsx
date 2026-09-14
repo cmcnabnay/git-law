@@ -17,12 +17,13 @@ import {
   pushBranch,
   syncFromRemote,
   createBranch,
-  listFilesAtRef,
+  listWorkingFiles,
   getGitIdentity,
   setGitIdentity,
   type LocalStatus,
   type LocalFileEntry,
 } from "../local/localGit.js";
+import { isPreviewableDocument, docxBytesToHtml } from "../local/docxPreview.js";
 
 type Phase = "checking" | "no-handle" | "needs-permission" | "not-a-repo" | "ready";
 
@@ -43,6 +44,11 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
   const [status, setStatus] = useState<LocalStatus | null>(null);
   const [tree, setTree] = useState<LocalFileEntry[]>([]);
   const [treeError, setTreeError] = useState<string | null>(null);
+
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const [commitMessage, setCommitMessage] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -98,7 +104,7 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
       if (s.currentBranch) {
         setTreeError(null);
         try {
-          setTree(await listFilesAtRef(fs, s.currentBranch));
+          setTree(await listWorkingFiles(fs));
         } catch (e: any) {
           setTreeError(e.message);
         }
@@ -220,6 +226,28 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
   }
 
   async function handleOpenFile(path: string) {
+    if (!handle) return;
+    setError(null);
+    setPreviewPath(path);
+    setPreviewHtml(null);
+    setPreviewError(null);
+    if (!isPreviewableDocument(path)) {
+      setPreviewError("not-supported");
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const fs = new FsaFs(handle);
+      const data = (await fs.promises.readFile(path)) as Uint8Array;
+      setPreviewHtml(await docxBytesToHtml(data));
+    } catch (e: any) {
+      setPreviewError(e.message);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function handleDownloadFile(path: string) {
     if (!handle) return;
     setError(null);
     try {
@@ -413,16 +441,59 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
             className="repo-row"
             key={entry.path}
             onClick={() => handleOpenFile(entry.path)}
-            style={{ cursor: "pointer" }}
-            title="Open with your default app for this file type"
+            style={{ cursor: "pointer", background: previewPath === entry.path ? "var(--card-alt, rgba(127,127,127,0.08))" : undefined }}
           >
             <div>
-              <span className="mono">{entry.path}</span>
-              <div style={{ color: "var(--muted)", fontSize: 12 }}>{formatBytes(entry.size)}</div>
+              {/* File System Access never exposes the real absolute OS path (by
+                  design, for privacy) — this is the picked folder's name plus the
+                  path within it, the most specific location the browser can know. */}
+              <span className="mono">
+                {handle?.name}/{entry.path}
+              </span>
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                {formatBytes(entry.size)}
+                {entry.mtimeMs > 0 && <> · {new Date(entry.mtimeMs).toLocaleString()}</>}
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {previewPath && (
+        <div className="card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+            <strong className="mono" style={{ fontSize: 16 }}>
+              {previewPath}
+            </strong>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => handleDownloadFile(previewPath)}>Download</button>
+              <button onClick={() => setPreviewPath(null)}>Close</button>
+            </div>
+          </div>
+
+          {previewLoading && <p>Loading preview...</p>}
+
+          {!previewLoading && previewError === "not-supported" && (
+            <p style={{ color: "var(--muted)" }}>
+              Git Law can only render <code className="mono">.docx</code> files in the browser. This file is a
+              different format, so there's no inline preview — use Download above to open it.
+            </p>
+          )}
+
+          {!previewLoading && previewError && previewError !== "not-supported" && (
+            <div>
+              <p style={{ color: "var(--danger)" }}>Couldn't render a preview: {previewError}</p>
+              <p style={{ color: "var(--muted)", fontSize: 13 }}>Use Download above to open it in Word instead.</p>
+            </div>
+          )}
+
+          {!previewLoading && !previewError && previewHtml !== null && (
+            <div className="formatted-view">
+              <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
