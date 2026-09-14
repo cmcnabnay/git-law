@@ -70,6 +70,67 @@ test("computeRedline diffs at clause granularity, leaving unrelated clauses in t
   assert.deepEqual(added, ["this is a totally different unrelated new ending."]);
 });
 
+test("computeRedline never embeds a literal newline inside a removed/added chunk", () => {
+  // mammoth joins paragraphs with "\n\n", so a changed paragraph's raw text
+  // (as computeRedline receives it) ends with a trailing "\n" — that must
+  // never end up glued onto the end of the last clause of a replaced run,
+  // or the pre-wrap CSS renders it as a hard line break splitting the
+  // strikethrough block from the inserted block right after it.
+  const oldText =
+    "Intro paragraph that stays the same.\n\n" +
+    "Shared opening clause, this ending is the old unrelated text entirely.\n\n" +
+    "Outro paragraph that stays the same.";
+  const newText =
+    "Intro paragraph that stays the same.\n\n" +
+    "Shared opening clause, this ending is a wildly different replacement now.\n\n" +
+    "Outro paragraph that stays the same.";
+
+  const { changes } = computeRedline(oldText, newText);
+  for (const c of changes) {
+    if (c.added || c.removed) {
+      assert.ok(!c.value.includes("\n"), `expected no embedded newline in: ${JSON.stringify(c.value)}`);
+    }
+  }
+});
+
+test("computeRedline treats two clauses as unchanged when only their boundary punctuation differs", () => {
+  const oldText =
+    "Shared clause, or destroy copies of Confidential Information in the ordinary course. " +
+    "Recipient's confidentiality obligations under this Agreement shall continue only until expiration.";
+  const newText =
+    "Shared clause, or destroy copies of Confidential Information in the ordinary course, " +
+    "provided that such retained copies remain subject to this agreement and are not used for any purpose.";
+
+  const { changes } = computeRedline(oldText, newText);
+  const unchangedText = changes
+    .filter((c) => !c.added && !c.removed)
+    .map((c) => c.value)
+    .join("");
+  const removed = changes.filter((c) => c.removed).map((c) => c.value);
+  const added = changes.filter((c) => c.added).map((c) => c.value);
+
+  assert.ok(unchangedText.includes("or destroy copies of Confidential Information in the ordinary course"));
+  assert.deepEqual(removed, ["Recipient's confidentiality obligations under this Agreement shall continue only until expiration."]);
+  assert.deepEqual(added, [
+    "provided that such retained copies remain subject to this agreement and are not used for any purpose.",
+  ]);
+});
+
+test("computeRedline keeps a closing quote with the clause it closes, not the clause after it", () => {
+  const oldText =
+    'whether or not marked or designated as "confidential," that is, where practicable, marked as such, and all notes, analyses, and summaries.';
+  const newText = 'whether or not marked or designated as "confidential," and all notes, analyses, and summaries.';
+
+  const { changes } = computeRedline(oldText, newText);
+  const removed = changes.filter((c) => c.removed).map((c) => c.value);
+
+  // The removed text must start with "that is" — not a stray leading quote
+  // torn off the end of the preceding (unchanged) `"confidential,"` clause.
+  assert.equal(removed.length, 1);
+  assert.ok(removed[0].trim().startsWith("that is"), `expected clause to start with "that is", got: ${JSON.stringify(removed[0])}`);
+  assert.ok(!removed[0].includes('"'), `expected no stray quote in removed clause: ${JSON.stringify(removed[0])}`);
+});
+
 test("computeRedline keeps a lightly edited paragraph as a precise word-level diff", () => {
   const { changes } = computeRedline(
     "The Recipient shall keep the Confidential Information secret for one year.",

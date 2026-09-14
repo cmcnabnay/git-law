@@ -45,11 +45,27 @@ function wordDiffOrReplace(oldClause: string, newClause: string): Change[] {
   return wordDiff;
 }
 
-// Splits on , . : ; keeping each delimiter (and any trailing whitespace)
-// attached to the clause it ends, so concatenating the pieces back together
-// reproduces the original text exactly.
+// Splits on , . : ; keeping each delimiter attached to the clause it ends,
+// along with a trailing quote (a closing quote right after the punctuation
+// belongs with the clause that precedes it, e.g. `confidential,"` — that's
+// just how a quoted term is closed before a comma) and any trailing spaces
+// or tabs — but deliberately NOT a newline, so mammoth's paragraph-joining
+// "\n\n" can't get swallowed into the last clause and force a line break
+// between two clauses that are otherwise meant to render inline (it instead
+// falls out as its own trailing whitespace-only "clause", which matches
+// identically on both sides and so never affects rendering). Concatenating
+// the pieces back together reproduces the original text exactly.
 function splitClauses(text: string): string[] {
-  return text.match(/[^,.:;]*[,.:;]+\s*|[^,.:;]+$/g) ?? [text];
+  return text.match(/[^,.:;]*[,.:;]+["']?[ \t]*|[^,.:;]+$/g) ?? [text];
+}
+
+// Two clauses count as the same for matching purposes even if only their
+// boundary punctuation differs (e.g. "...course." vs "...course," when a
+// clause that used to end a sentence now continues into a new one) — the
+// rendered value still keeps each clause's own exact original punctuation;
+// this only affects whether diffArrays treats them as an unchanged match.
+function normalizeForCompare(clause: string): string {
+  return clause.trim().replace(/[,.:;]+["']?$/, "").trim();
 }
 
 /**
@@ -69,7 +85,9 @@ function splitClauses(text: string): string[] {
  * salad of coincidentally shared words.
  */
 function diffParagraph(oldParagraph: string, newParagraph: string): Change[] {
-  const clauseChanges = diffArrays(splitClauses(oldParagraph), splitClauses(newParagraph));
+  const clauseChanges = diffArrays(splitClauses(oldParagraph), splitClauses(newParagraph), {
+    comparator: (a, b) => normalizeForCompare(a) === normalizeForCompare(b),
+  });
   const changes: Change[] = [];
 
   let i = 0;
