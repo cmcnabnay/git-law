@@ -106,6 +106,8 @@ export const api = {
     ),
   listPrs: (repoId: string) => request<PullRequest[]>(`/repos/${repoId}/prs`),
   getPr: (repoId: string, prId: string) => request<PrDetail>(`/repos/${repoId}/prs/${prId}`),
+  deletePr: (repoId: string, prId: string) =>
+    request<{ ok: true; deleted: PullRequest }>(`/repos/${repoId}/prs/${prId}`, { method: "DELETE" }),
   approvePr: (repoId: string, prId: string, actorEmail: string) =>
     request<PullRequest>(`/repos/${repoId}/prs/${prId}/approve`, {
       method: "POST",

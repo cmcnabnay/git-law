@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { api, type PrDetail, type Repo } from "../api/client.js";
 import { RedlineDiffView } from "../components/RedlineDiffView.js";
 
@@ -15,10 +15,12 @@ const EVENT_LABEL: Record<string, string> = {
 
 export function PrDetailPage() {
   const { repoId, prId } = useParams<{ repoId: string; prId: string }>();
+  const navigate = useNavigate();
   const [repo, setRepo] = useState<Repo | null>(null);
   const [detail, setDetail] = useState<PrDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [view, setView] = useState<"redline" | "formatted">("redline");
   const [actorEmail, setActorEmail] = useState("");
   const [rejectComment, setRejectComment] = useState("");
@@ -84,6 +86,20 @@ export function PrDetailPage() {
     }
   }
 
+  async function handleDeletePr() {
+    if (!repoId || !prId || !detail) return;
+    if (!window.confirm(`Permanently delete PR "${detail.pr.branch} → ${detail.pr.target_branch}"? This cannot be undone.`))
+      return;
+    setDeleting(true);
+    try {
+      await api.deletePr(repoId, prId);
+      navigate(`/repos/${repoId}`);
+    } catch (e: any) {
+      setError(e.message);
+      setDeleting(false);
+    }
+  }
+
   if (error && !detail) return <p style={{ color: "var(--danger)" }}>{error}</p>;
   if (!detail || !repo) return <p>Loading...</p>;
 
@@ -91,9 +107,14 @@ export function PrDetailPage() {
 
   return (
     <div>
-      <h2>
-        {pr.branch} <span style={{ color: "var(--muted)" }}>→ {pr.target_branch}</span>
-      </h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <h2>
+          {pr.branch} <span style={{ color: "var(--muted)" }}>→ {pr.target_branch}</span>
+        </h2>
+        <button className="danger" onClick={handleDeletePr} disabled={deleting}>
+          {deleting ? "Deleting…" : "Delete PR"}
+        </button>
+      </div>
       <span className={`badge ${pr.status}`}>{pr.status}</span>{" "}
       <span style={{ color: "var(--muted)", fontSize: 13 }}>
         opened by {pr.author_email ?? "unknown"}

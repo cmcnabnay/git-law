@@ -195,6 +195,11 @@ export const prRepo = {
       .prepare(`UPDATE pull_requests SET turn_email = ?, updated_at = datetime('now') WHERE id = ?`)
       .run(turnEmail, id);
   },
+  /** Cascades to pr_events via its ON DELETE CASCADE foreign key. Does not
+   * touch the branch in the bare repo — a re-push recreates the PR row. */
+  delete(id: string): void {
+    getDb().prepare(`DELETE FROM pull_requests WHERE id = ?`).run(id);
+  },
 };
 
 export const eventsRepo = {

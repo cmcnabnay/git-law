@@ -56,6 +56,16 @@ prsRouter.get<PrParams>(
   })
 );
 
+prsRouter.delete<PrParams>("/:prId", (req, res) => {
+  const repo = reposRepo.get(req.params.repoId);
+  if (!repo) return res.status(404).json({ error: "repo not found" });
+  const pr = prRepo.get(req.params.prId);
+  if (!pr || pr.repo_id !== repo.id) return res.status(404).json({ error: "pull request not found" });
+
+  prRepo.delete(pr.id);
+  res.json({ ok: true, deleted: pr });
+});
+
 prsRouter.post<PrParams>(
   "/:prId/approve",
   asyncHandler(async (req, res) => {
