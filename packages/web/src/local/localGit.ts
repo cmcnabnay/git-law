@@ -133,6 +133,15 @@ export async function fetchOrigin(fs: FsaFs): Promise<void> {
   await git.fetch({ fs, http, dir: DIR, remote: "origin" });
 }
 
+/** `git clone <url>` into an already-picked (empty) folder — `singleBranch`
+ * defaults to false, so every branch is fetched as a remote-tracking ref,
+ * matching a real terminal clone; only the default branch is checked out,
+ * same as the terminal. Pair with `syncFromRemote` right after to also
+ * create local branches for every other remote branch. */
+export async function cloneRepo(fs: FsaFs, url: string): Promise<void> {
+  await git.clone({ fs, http, dir: DIR, url });
+}
+
 /** Remote-tracking branch short names under `origin/`, excluding the
  * symbolic `HEAD`. */
 export async function remoteBranchNames(fs: FsaFs): Promise<string[]> {

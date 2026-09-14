@@ -219,6 +219,26 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
     }
   }
 
+  async function handleOpenFile(path: string) {
+    if (!handle) return;
+    setError(null);
+    try {
+      const fs = new FsaFs(handle);
+      const data = (await fs.promises.readFile(path)) as Uint8Array;
+      const blob = new Blob([new Uint8Array(data)]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = path.split("/").pop() || path;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
   async function handleCreateBranch(e: React.FormEvent) {
     e.preventDefault();
     if (!handle || !newBranchName.trim() || !newBranchFrom) return;
@@ -389,7 +409,13 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
         {treeError && <p style={{ color: "var(--danger)" }}>{treeError}</p>}
         {!treeError && tree.length === 0 && <p>No files on this branch yet.</p>}
         {tree.map((entry) => (
-          <div className="repo-row" key={entry.path}>
+          <div
+            className="repo-row"
+            key={entry.path}
+            onClick={() => handleOpenFile(entry.path)}
+            style={{ cursor: "pointer" }}
+            title="Open with your default app for this file type"
+          >
             <div>
               <span className="mono">{entry.path}</span>
               <div style={{ color: "var(--muted)", fontSize: 12 }}>{formatBytes(entry.size)}</div>

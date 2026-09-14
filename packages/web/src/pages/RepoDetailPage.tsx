@@ -4,8 +4,13 @@ import { api, type Repo, type PullRequest, type TreeEntry } from "../api/client.
 import { useSetRepoHeaderName } from "../context/repoHeader.js";
 import { formatBytes, timeAgo } from "../format.js";
 import { LocalPanel } from "../components/LocalPanel.js";
+import { FsaFs } from "../local/fsaFs.js";
+import { saveDirHandle } from "../local/handleStore.js";
+import { cloneRepo, syncFromRemote } from "../local/localGit.js";
 
 type Tab = "local" | "remote" | "prs" | "settings";
+
+const FSA_SUPPORTED = typeof window !== "undefined" && "showDirectoryPicker" in window;
 
 function StatusBadge({ status }: { status: PullRequest["status"] }) {
   return <span className={`badge ${status}`}>{status}</span>;
@@ -37,8 +42,10 @@ function FileRow({ repo, refName, entry }: { repo: Repo; refName: string; entry:
   );
 }
 
-function ClonePopover({ repo, onClose }: { repo: Repo; onClose: () => void }) {
+function ClonePopover({ repo, onClose, onCloned }: { repo: Repo; onClose: () => void; onCloned: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [cloning, setCloning] = useState(false);
+  const [cloneError, setCloneError] = useState<string | null>(null);
   const cloneUrl = repo.cloneUrl ?? repo.clonePath ?? repo.bare_path;
 
   const otherBranches = (repo.branches ?? [])
@@ -59,11 +66,35 @@ function ClonePopover({ repo, onClose }: { repo: Repo; onClose: () => void }) {
     });
   }
 
+  async function handleCloneFromBrowser() {
+    setCloneError(null);
+    let parent: FileSystemDirectoryHandle;
+    try {
+      parent = await window.showDirectoryPicker({ mode: "readwrite" });
+    } catch (e: any) {
+      if (e?.name !== "AbortError") setCloneError(e.message);
+      return;
+    }
+    setCloning(true);
+    try {
+      const sub = await parent.getDirectoryHandle(repo.name, { create: true });
+      const fs = new FsaFs(sub);
+      await cloneRepo(fs, cloneUrl);
+      await syncFromRemote(fs); // local branch for every remote branch besides the default, same as the command-line version above
+      await saveDirHandle(repo.id, sub);
+      onCloned();
+    } catch (e: any) {
+      setCloneError(e.message);
+    } finally {
+      setCloning(false);
+    }
+  }
+
   return (
     <>
       <div className="popover-backdrop" onClick={onClose} />
       <div className="popover clone-popover">
-        <strong>Clone</strong>
+        <strong>Command line</strong>
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "start" }}>
           <pre className="mono clone-cmd" style={{ margin: 0, flex: 1 }}>
             {cloneCommand}
@@ -74,6 +105,22 @@ function ClonePopover({ repo, onClose }: { repo: Repo; onClose: () => void }) {
           Run this command in your terminal to clone the repo into a{" "}
           <span className="mono">{repo.name}</span> folder with every branch checked out locally.
         </p>
+
+        {FSA_SUPPORTED && (
+          <>
+            <hr style={{ margin: "14px 0", border: "none", borderTop: "1px solid var(--border)" }} />
+            <strong>Clone from browser</strong>
+            <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
+              No terminal needed — pick a folder on this machine and it does the same thing: clones the repo into a{" "}
+              <span className="mono">{repo.name}</span> subfolder there, checks out every branch, and links it in
+              the Local tab.
+            </p>
+            <button onClick={handleCloneFromBrowser} disabled={cloning}>
+              {cloning ? "Cloning…" : "Choose folder & clone"}
+            </button>
+            {cloneError && <p style={{ color: "var(--danger)", fontSize: 12 }}>{cloneError}</p>}
+          </>
+        )}
       </div>
     </>
   );
@@ -180,7 +227,16 @@ export function RepoDetailPage() {
               <button className="primary" onClick={() => setShowClone((v) => !v)}>
                 Clone
               </button>
-              {showClone && <ClonePopover repo={repo} onClose={() => setShowClone(false)} />}
+              {showClone && (
+                <ClonePopover
+                  repo={repo}
+                  onClose={() => setShowClone(false)}
+                  onCloned={() => {
+                    setShowClone(false);
+                    setTab("local");
+                  }}
+                />
+              )}
             </div>
           </div>
 
