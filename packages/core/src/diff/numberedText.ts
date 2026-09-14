@@ -30,14 +30,20 @@ function ownText(el: HTMLElement): string {
  * Walks the block-level children of `node` in document order, invoking
  * `visit` once per paragraph-like block (a plain <p>/<h1-6>/<table>, or a
  * numbered/bulleted <li>) with its own text and, for a numbered <li>, the
- * number a browser would actually render for it: a plain sequential counter
- * that resets to 1 at the start of every <ol> — including a nested one,
- * which is exactly how mammoth's default HTML conversion renders a
- * multi-level Word list (it emits bare nested <ol>/<li>, not the composite
- * "1.1" numbering Word's own numFmt/lvlText would produce, since it doesn't
- * carry that formatting into the HTML). Matching the browser's actual
- * rendering — rather than trying to reconstruct Word's original numbering
- * scheme — is what keeps this consistent with what the Formatted tab shows.
+ * number a browser would actually render for it: a sequential counter,
+ * shared across every top-level <ol> sibling found among `node`'s direct
+ * children, but reset to 1 for a genuinely nested <ol> (one found while
+ * recursing into an <li> — a fresh `forEachBlock` call, so it gets its own
+ * counter). The shared-across-siblings part matters because mammoth's docx
+ * conversion splits one continuous Word numbered list into multiple
+ * sibling <ol> elements whenever a non-list paragraph sits between list
+ * items (e.g. a manually-typed "5. ..." paragraph rather than a real
+ * auto-numbered list item) — Word itself still renders the items after
+ * that split continuing the same sequence (6, 7, 8, ...), so restarting
+ * each sibling <ol> at 1 would silently disagree with the actual document.
+ * A nested <ol> restarts at 1 correctly, since mammoth emits bare nested
+ * <ol>/<li> for a multi-level Word list rather than composite "1.1"
+ * numbering, so there's no shared sequence to continue there anyway.
  *
  * A block with no text of its own (e.g. an empty paragraph) is skipped
  * entirely, never invoking `visit` — callers rely on that to keep this
@@ -45,13 +51,14 @@ function ownText(el: HTMLElement): string {
  * which likewise drops empty paragraphs.
  */
 function forEachBlock(node: HTMLElement | Node, visit: (el: HTMLElement, text: string, number: number | null) => void): void {
+  let numberedCounter = 0;
   for (const child of node.childNodes) {
     if (child.nodeType !== NodeType.ELEMENT_NODE) continue;
     const el = child as HTMLElement;
     const tag = el.tagName?.toLowerCase();
 
     if (tag === NUMBERED_TAG || tag === BULLET_TAG) {
-      let n = 0;
+      let n = numberedCounter;
       for (const itemNode of el.childNodes) {
         if (itemNode.nodeType !== NodeType.ELEMENT_NODE) continue;
         const item = itemNode as HTMLElement;
@@ -61,6 +68,7 @@ function forEachBlock(node: HTMLElement | Node, visit: (el: HTMLElement, text: s
         if (text) visit(item, text, tag === NUMBERED_TAG ? n : null);
         forEachBlock(item, visit);
       }
+      if (tag === NUMBERED_TAG) numberedCounter = n;
       continue;
     }
 

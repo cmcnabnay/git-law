@@ -7,6 +7,23 @@ test("htmlToNumberedText numbers a flat ordered list like a browser renders it",
   assert.equal(htmlToNumberedText(html), "1. Definitions.\n\n2. Confidentiality Obligations.\n\n3. Term.\n\n");
 });
 
+test("htmlToNumberedText continues numbering across a sibling <ol> split by a plain paragraph", () => {
+  // Mirrors what mammoth produces when a manually-typed "5. ..." paragraph
+  // (not a real Word auto-numbered list item) is inserted between list
+  // items — it splits one Word list into two sibling <ol> elements, but
+  // Word itself keeps rendering the second half continuing the sequence.
+  const html =
+    "<ol><li>Definitions.</li><li>Confidentiality Obligations.</li><li>Term.</li></ol>" +
+    "<p>4. Manually numbered paragraph, not a real list item.</p>" +
+    "<ol><li>Governing Law.</li><li>Notices.</li></ol>";
+  assert.equal(
+    htmlToNumberedText(html),
+    "1. Definitions.\n\n2. Confidentiality Obligations.\n\n3. Term.\n\n" +
+      "4. Manually numbered paragraph, not a real list item.\n\n" +
+      "4. Governing Law.\n\n5. Notices.\n\n"
+  );
+});
+
 test("htmlToNumberedText restarts numbering inside a nested ordered list", () => {
   const html =
     "<ol><li>Definitions.</li>" +
