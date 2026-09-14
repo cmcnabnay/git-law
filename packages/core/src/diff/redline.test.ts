@@ -61,8 +61,8 @@ test("computeRedline diffs at clause granularity, leaving unrelated clauses in t
     .filter((c) => !c.added && !c.removed)
     .map((c) => c.value)
     .join("");
-  const removed = changes.filter((c) => c.removed).map((c) => c.value);
-  const added = changes.filter((c) => c.added).map((c) => c.value);
+  const removed = changes.filter((c) => c.removed).map((c) => c.value.trim());
+  const added = changes.filter((c) => c.added).map((c) => c.value.trim());
 
   assert.ok(unchangedText.includes("First clause,"));
   assert.ok(unchangedText.includes("second clause,"));
@@ -106,8 +106,8 @@ test("computeRedline treats two clauses as unchanged when only their boundary pu
     .filter((c) => !c.added && !c.removed)
     .map((c) => c.value)
     .join("");
-  const removed = changes.filter((c) => c.removed).map((c) => c.value);
-  const added = changes.filter((c) => c.added).map((c) => c.value);
+  const removed = changes.filter((c) => c.removed).map((c) => c.value.trim());
+  const added = changes.filter((c) => c.added).map((c) => c.value.trim());
 
   assert.ok(unchangedText.includes("or destroy copies of Confidential Information in the ordinary course"));
   assert.deepEqual(removed, ["Recipient's confidentiality obligations under this Agreement shall continue only until expiration."]);
@@ -129,6 +129,27 @@ test("computeRedline keeps a closing quote with the clause it closes, not the cl
   assert.equal(removed.length, 1);
   assert.ok(removed[0].trim().startsWith("that is"), `expected clause to start with "that is", got: ${JSON.stringify(removed[0])}`);
   assert.ok(!removed[0].includes('"'), `expected no stray quote in removed clause: ${JSON.stringify(removed[0])}`);
+});
+
+test("computeRedline reports unchanged/changed/removed paragraph status", () => {
+  const oldText =
+    "Intro unchanged.\n\n" + "Old paragraph A.\n\n" + "Old paragraph B extra removed.\n\n" + "Outro unchanged.";
+  const newText = "Intro unchanged.\n\n" + "Old paragraph A edited.\n\n" + "Outro unchanged.";
+
+  const { paragraphStatus } = computeRedline(oldText, newText);
+
+  assert.deepEqual(paragraphStatus.old, ["unchanged", "changed", "removed", "unchanged"]);
+  assert.deepEqual(paragraphStatus.new, ["unchanged", "changed", "unchanged"]);
+});
+
+test("computeRedline reports unchanged/changed/added paragraph status", () => {
+  const oldText = "Intro.\n\n" + "Para A.\n\n" + "Outro.";
+  const newText = "Intro.\n\n" + "Para A edited.\n\n" + "Para B extra added.\n\n" + "Outro.";
+
+  const { paragraphStatus } = computeRedline(oldText, newText);
+
+  assert.deepEqual(paragraphStatus.old, ["unchanged", "changed", "unchanged"]);
+  assert.deepEqual(paragraphStatus.new, ["unchanged", "changed", "added", "unchanged"]);
 });
 
 test("computeRedline keeps a lightly edited paragraph as a precise word-level diff", () => {

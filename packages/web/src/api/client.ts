@@ -71,6 +71,8 @@ export interface PrDetail {
   pr: PullRequest;
   events: PrEvent[];
   diffs: FileDiff[];
+  compareBranch: string;
+  compareSha: string;
 }
 
 export interface TreeEntry {
@@ -106,7 +108,8 @@ export const api = {
       `/repos/${repoId}/preview?rev=${encodeURIComponent(rev)}&path=${encodeURIComponent(path)}`
     ),
   listPrs: (repoId: string) => request<PullRequest[]>(`/repos/${repoId}/prs`),
-  getPr: (repoId: string, prId: string) => request<PrDetail>(`/repos/${repoId}/prs/${prId}`),
+  getPr: (repoId: string, prId: string, compareTo?: string) =>
+    request<PrDetail>(`/repos/${repoId}/prs/${prId}${compareTo ? `?compareTo=${encodeURIComponent(compareTo)}` : ""}`),
   deletePr: (repoId: string, prId: string) =>
     request<{ ok: true; deleted: PullRequest }>(`/repos/${repoId}/prs/${prId}`, { method: "DELETE" }),
   approvePr: (repoId: string, prId: string, actorEmail: string) =>

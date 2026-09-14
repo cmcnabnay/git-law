@@ -1,8 +1,15 @@
-import { diffArrays, diffLines, diffWordsWithSpace, type Change } from "diff";
+import { diffArrays, diffWordsWithSpace, type Change } from "diff";
+
+export type ParagraphStatus = "unchanged" | "changed" | "removed" | "added";
 
 export interface RedlineDiff {
   changes: Change[];
   stats: { added: number; removed: number };
+  // Per-paragraph status, in document order, for the old and new side
+  // respectively — e.g. paragraphStatus.old[3] describes the 4th paragraph
+  // of the old document. Lets a consumer (see annotateParagraphHtml) mark up
+  // the corresponding block element in each side's rendered HTML.
+  paragraphStatus: { old: ParagraphStatus[]; new: ParagraphStatus[] };
 }
 
 function countWords(s: string): number {
@@ -112,6 +119,18 @@ function diffParagraph(oldParagraph: string, newParagraph: string): Change[] {
   return changes;
 }
 
+// mammoth (via htmlToNumberedText) joins paragraphs with "\n\n" — split back
+// into one entry per paragraph so diffArrays can track real paragraph
+// indices (see paragraphStatus), rather than diffLines' line-oriented chunks
+// which don't expose how many actual paragraphs a merged run represents.
+function splitParagraphs(text: string): string[] {
+  return text.split("\n\n").filter((p) => p.length > 0);
+}
+
+function withTrailingBreak(value: string): string {
+  return value + "\n\n";
+}
+
 /**
  * Word-level diff over plain text extracted from each docx version.
  *
@@ -124,15 +143,19 @@ function diffParagraph(oldParagraph: string, newParagraph: string): Change[] {
  *
  * Diffing is done in three passes, each anchored on the one before it so a
  * flat LCS never gets the chance to match content across unrelated regions:
- * paragraphs first (mammoth joins paragraphs with "\n\n", so diffLines
- * effectively aligns paragraph-by-paragraph), then clauses within a matched
- * removed/added paragraph pair (see diffParagraph), then words within a
- * matched pair of clauses (see wordDiffOrReplace).
+ * paragraphs first, then clauses within a matched removed/added paragraph
+ * pair (see diffParagraph), then words within a matched pair of clauses
+ * (see wordDiffOrReplace).
  */
 export function computeRedline(oldText: string, newText: string): RedlineDiff {
-  const paragraphChanges = diffLines(oldText, newText);
+  const oldParagraphs = splitParagraphs(oldText);
+  const newParagraphs = splitParagraphs(newText);
+  const paragraphChanges = diffArrays(oldParagraphs, newParagraphs);
+
   const changes: Change[] = [];
   const stats = { added: 0, removed: 0 };
+  const oldStatus: ParagraphStatus[] = [];
+  const newStatus: ParagraphStatus[] = [];
 
   const record = (c: Change) => {
     changes.push(c);
@@ -144,33 +167,51 @@ export function computeRedline(oldText: string, newText: string): RedlineDiff {
   while (i < paragraphChanges.length) {
     const chunk = paragraphChanges[i];
     if (!chunk.removed) {
-      record(chunk);
+      // Either genuinely unchanged, or (chunk.added true) a pure insertion
+      // with nothing removed at this position — diffArrays reports both the
+      // same way (removed: falsy), so chunk.added decides which this is.
+      for (const para of chunk.value as string[]) {
+        record({ value: withTrailingBreak(para), added: !!chunk.added, removed: false } as Change);
+        if (chunk.added) {
+          newStatus.push("added");
+        } else {
+          oldStatus.push("unchanged");
+          newStatus.push("unchanged");
+        }
+      }
       i++;
       continue;
     }
 
-    // A run of removed paragraphs directly followed by a run of added
-    // paragraphs is a modified region: pair them up index-by-index and
-    // word-diff each pair, so replaced paragraphs stay aligned rather than
-    // being matched against whatever paragraph happens to follow.
-    const removedRun: Change[] = [];
-    while (i < paragraphChanges.length && paragraphChanges[i].removed) {
-      removedRun.push(paragraphChanges[i]);
-      i++;
-    }
-    const addedRun: Change[] = [];
-    while (i < paragraphChanges.length && paragraphChanges[i].added) {
-      addedRun.push(paragraphChanges[i]);
-      i++;
-    }
+    // A removed chunk directly followed by an added chunk is a modified
+    // region: pair paragraphs up index-by-index and clause-diff each pair,
+    // so replaced paragraphs stay aligned rather than being matched against
+    // whatever paragraph happens to follow.
+    const removedParas = chunk.value as string[];
+    i++;
+    const next = paragraphChanges[i];
+    const addedParas = next?.added ? (next.value as string[]) : [];
+    if (next?.added) i++;
 
-    const pairCount = Math.min(removedRun.length, addedRun.length);
+    const pairCount = Math.min(removedParas.length, addedParas.length);
     for (let p = 0; p < pairCount; p++) {
-      diffParagraph(removedRun[p].value, addedRun[p].value).forEach(record);
+      const paraChanges = diffParagraph(removedParas[p], addedParas[p]);
+      paraChanges.forEach((c, idx) => {
+        const isLast = idx === paraChanges.length - 1;
+        record({ ...c, value: isLast ? withTrailingBreak(c.value) : c.value } as Change);
+      });
+      oldStatus.push("changed");
+      newStatus.push("changed");
     }
-    for (let p = pairCount; p < removedRun.length; p++) record(removedRun[p]);
-    for (let p = pairCount; p < addedRun.length; p++) record(addedRun[p]);
+    for (let p = pairCount; p < removedParas.length; p++) {
+      record({ value: withTrailingBreak(removedParas[p]), added: false, removed: true } as Change);
+      oldStatus.push("removed");
+    }
+    for (let p = pairCount; p < addedParas.length; p++) {
+      record({ value: withTrailingBreak(addedParas[p]), added: true, removed: false } as Change);
+      newStatus.push("added");
+    }
   }
 
-  return { changes, stats };
+  return { changes, stats, paragraphStatus: { old: oldStatus, new: newStatus } };
 }

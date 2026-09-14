@@ -7,6 +7,8 @@ import {
   rejectPr,
   addComment,
   computePrDiff,
+  branchExists,
+  branchHeadSha,
   type FileDiff,
 } from "@gitlaw/core";
 import { asyncHandler } from "../asyncHandler.js";
@@ -43,15 +45,27 @@ prsRouter.get<PrParams>(
     const pr = prRepo.get(req.params.prId);
     if (!pr || pr.repo_id !== repo.id) return res.status(404).json({ error: "pull request not found" });
 
+    // ?compareTo=<branch> lets the caller preview the diff against any
+    // branch's current head instead of the PR's stored base_sha — a
+    // display-only override for this one response, never written back to
+    // the PR row (which keeps deciding what it merges into and, by
+    // default, what it diffs against).
+    const compareTo = req.query.compareTo as string | undefined;
+    const useOverride = !!compareTo && branchExists(repo.bare_path, compareTo);
+    const baseSha = useOverride ? branchHeadSha(repo.bare_path, compareTo!) : pr.base_sha;
+    const compareBranch = useOverride ? compareTo! : (pr.base_branch ?? pr.target_branch);
+
     const diffs: FileDiff[] =
-      isRealCommit(pr.head_sha) && isRealCommit(pr.base_sha)
-        ? await computePrDiff(repo.bare_path, pr.base_sha, pr.head_sha)
+      isRealCommit(pr.head_sha) && isRealCommit(baseSha)
+        ? await computePrDiff(repo.bare_path, baseSha, pr.head_sha)
         : [];
 
     res.json({
       pr,
       events: eventsRepo.listForPr(pr.id),
       diffs,
+      compareBranch,
+      compareSha: baseSha,
     });
   })
 );

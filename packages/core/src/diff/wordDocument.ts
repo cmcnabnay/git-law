@@ -1,5 +1,6 @@
-import { docxBufferToText, docxBufferToHtml } from "./docxToHtml.js";
+import { docxBufferToHtml } from "./docxToHtml.js";
 import { legacyDocBufferToText, textToParagraphHtml } from "./docToText.js";
+import { htmlToNumberedText } from "./numberedText.js";
 
 export const SUPPORTED_EXTENSIONS = [".docx", ".doc"];
 
@@ -20,8 +21,12 @@ export interface WordDocument {
 export async function readWordDocument(buf: Buffer, filePath: string): Promise<WordDocument> {
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".docx")) {
-    const [text, html] = await Promise.all([docxBufferToText(buf), docxBufferToHtml(buf)]);
-    return { text, html };
+    const html = await docxBufferToHtml(buf);
+    // Derived from the same HTML the Formatted view renders (rather than a
+    // separate mammoth.extractRawText call) so a numbered paragraph carries
+    // its number here too — plain-text extraction otherwise drops Word list
+    // numbering entirely, since it's list markup, not run text.
+    return { text: htmlToNumberedText(html), html };
   }
   if (lower.endsWith(".doc")) {
     const text = await legacyDocBufferToText(buf);

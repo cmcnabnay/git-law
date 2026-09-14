@@ -26,19 +26,26 @@ export function PrDetailPage() {
   const [rejectComment, setRejectComment] = useState("");
   const [showRejectBox, setShowRejectBox] = useState(false);
   const [comment, setComment] = useState("");
+  const [compareTo, setCompareTo] = useState<string | null>(null);
 
-  function load() {
+  function load(compareOverride?: string) {
     if (!repoId || !prId) return;
-    Promise.all([api.getRepo(repoId), api.getPr(repoId, prId)])
+    Promise.all([api.getRepo(repoId), api.getPr(repoId, prId, compareOverride)])
       .then(([r, d]) => {
         setRepo(r);
         setDetail(d);
+        setCompareTo(d.compareBranch);
         if (!actorEmail && r.participants?.length) setActorEmail(r.participants[0].email);
       })
       .catch((e) => setError(e.message));
   }
 
   useEffect(load, [repoId, prId]);
+
+  function handleCompareChange(branch: string) {
+    setCompareTo(branch);
+    load(branch);
+  }
 
   async function handleApprove() {
     if (!repoId || !prId) return;
@@ -119,7 +126,6 @@ export function PrDetailPage() {
       <span style={{ color: "var(--muted)", fontSize: 13 }}>
         opened by {pr.author_email ?? "unknown"}
         {pr.turn_email && pr.status === "open" ? ` · waiting on ${pr.turn_email}` : ""}
-        {pr.base_branch && pr.base_branch !== pr.target_branch ? ` · comparing against ${pr.base_branch}` : ""}
       </span>
 
       <div className="card">
@@ -128,6 +134,21 @@ export function PrDetailPage() {
           {(repo.participants ?? []).map((p) => (
             <option key={p.email} value={p.email}>
               {p.display_name} &lt;{p.email}&gt;
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 20, marginBottom: 16 }}>
+        <span>comparing against</span>
+        <select
+          value={compareTo ?? detail.compareBranch}
+          onChange={(e) => handleCompareChange(e.target.value)}
+          style={{ fontSize: 20, width: "auto", padding: "4px 8px" }}
+        >
+          {(repo.branches ?? []).map((b) => (
+            <option key={b.name} value={b.name}>
+              {b.name}
             </option>
           ))}
         </select>
@@ -150,11 +171,11 @@ export function PrDetailPage() {
             <RedlineDiffView diff={diff} />
           ) : (
             <div className="formatted-columns">
-              <div className="formatted-view">
-                <h4>Before ({pr.base_branch ?? pr.target_branch})</h4>
+              <div className="formatted-view before">
+                <h4>Before ({detail.compareBranch})</h4>
                 <div dangerouslySetInnerHTML={{ __html: diff.oldHtml ?? "<p><em>(file did not exist)</em></p>" }} />
               </div>
-              <div className="formatted-view">
+              <div className="formatted-view after">
                 <h4>After ({pr.branch})</h4>
                 <div dangerouslySetInnerHTML={{ __html: diff.newHtml ?? "<p><em>(file removed)</em></p>" }} />
               </div>
@@ -162,7 +183,7 @@ export function PrDetailPage() {
           )}
 
           <div style={{ marginTop: 12 }}>
-            <a href={api.blobUrl(repo.id, pr.base_sha, diff.path)}>Download {pr.base_branch ?? pr.target_branch} version</a>
+            <a href={api.blobUrl(repo.id, detail.compareSha, diff.path)}>Download {detail.compareBranch} version</a>
             {" · "}
             <a href={api.blobUrl(repo.id, pr.head_sha, diff.path)}>Download {pr.branch} version</a>
           </div>

@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "e2e": "tsx scripts/e2e/runE2E.ts",
-    "test": "tsx --test packages/core/src/diff/redline.test.ts packages/core/src/git/merge.test.ts packages/core/src/pr/prService.test.ts",
+    "test": "tsx --test packages/core/src/diff/redline.test.ts packages/core/src/diff/numberedText.test.ts packages/core/src/git/merge.test.ts packages/core/src/pr/prService.test.ts",
     "gitlaw": "tsx packages/cli/src/bin.ts",
     "dev:server": "tsx packages/server/src/main.ts",
     "dev:web": "npm run dev --workspace=@gitlaw/web"

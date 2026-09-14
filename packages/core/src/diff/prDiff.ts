@@ -2,6 +2,7 @@ import { readBlob } from "../git/show.js";
 import { changedFiles } from "../git/changedFiles.js";
 import { readWordDocument, isSupportedDocument } from "./wordDocument.js";
 import { computeRedline, type RedlineDiff } from "./redline.js";
+import { annotateParagraphHtml } from "./numberedText.js";
 
 export interface FileDiff {
   path: string;
@@ -31,11 +32,17 @@ export async function computeFileDiff(
     safeReadDocument(barePath, baseSha, filePath),
     safeReadDocument(barePath, headSha, filePath),
   ]);
+  const redline = computeRedline(oldVersion.text, newVersion.text);
   return {
     path: filePath,
-    redline: computeRedline(oldVersion.text, newVersion.text),
-    oldHtml: oldVersion.html,
-    newHtml: newVersion.html,
+    redline,
+    // Marked up with redline-removed/changed/added classes per paragraph
+    // (see annotateParagraphHtml) so the Formatted view can show the same
+    // GitHub-style colored backgrounds Redline conveys with strikethrough
+    // and highlighting, without diffing the rich HTML itself — which risks
+    // tearing markup mid-tag (see computeRedline's own doc comment).
+    oldHtml: oldVersion.html ? annotateParagraphHtml(oldVersion.html, redline.paragraphStatus.old) : null,
+    newHtml: newVersion.html ? annotateParagraphHtml(newVersion.html, redline.paragraphStatus.new) : null,
   };
 }
 

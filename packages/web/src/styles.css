@@ -153,6 +153,23 @@ input, textarea {
   background: var(--bg);
 }
 .formatted-view h4 { margin-top: 0; }
+
+/* GitHub-style paragraph-level highlighting: a whole changed block gets a
+   colored background rather than word-level markup, since diffing the rich
+   HTML itself risks tearing markup mid-tag (see computeRedline's doc
+   comment) — .redline-removed/.redline-added are side-specific already
+   (only ever present in the Before/After HTML respectively), but
+   .redline-changed marks a paragraph on both sides, so it needs the
+   before/after column to say which color it should take. */
+.formatted-view :is(.redline-removed, .redline-added, .redline-changed) {
+  padding: 2px 6px;
+  margin: 0 -6px;
+  border-radius: 4px;
+}
+.formatted-view .redline-removed { background: var(--removed-bg); }
+.formatted-view .redline-added { background: var(--added-bg); }
+.formatted-view.before .redline-changed { background: var(--removed-bg); }
+.formatted-view.after .redline-changed { background: var(--added-bg); }
 .formatted-columns {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -9,6 +9,7 @@
     "diff": "^7.0.0",
     "mammoth": "^1.8.0",
     "nanoid": "^5.0.9",
+    "node-html-parser": "^9.0.4",
     "word-extractor": "^1.0.4"
   },
   "devDependencies": {
