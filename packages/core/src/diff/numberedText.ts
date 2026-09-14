@@ -2,6 +2,7 @@ import { parse, NodeType, type HTMLElement, type Node } from "node-html-parser";
 
 const BULLET_TAG = "ul";
 const NUMBERED_TAG = "ol";
+const LEAF_BLOCK_TAGS = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"]);
 
 /** Text of `el` itself, excluding any nested <ol>/<ul> descendants — those
  * are walked separately so a numbered sub-list inside a list item doesn't
@@ -69,13 +70,18 @@ function forEachBlock(node: HTMLElement | Node, visit: (el: HTMLElement, text: s
       continue;
     }
 
-    // Anything else (p, h1-h6, a stray inline element, ...) is a leaf
-    // paragraph — don't recurse into it. ownText() already walks its whole
-    // subtree for text; recursing here too would re-visit each inline-
-    // formatted run (every <strong>/<em>/<a> mammoth produces for bold,
-    // italic, or linked text) as its own spurious extra "paragraph".
-    const text = ownText(el);
-    if (text) visit(el, text, null);
+    // Only a known block tag counts as its own paragraph — anything else
+    // (a stray <strong>/<em>/<a>/bookmark <a id="..."> at this level) is
+    // just inline formatting encountered while walking a container's
+    // children (e.g. an <li>'s children, walked below purely to find a
+    // nested <ol>/<ul>) and must be ignored, not treated as a leaf block.
+    // Treating "anything unrecognized" as a paragraph was exactly the bug:
+    // every <strong>Purpose</strong> mammoth emits for a bolded defined
+    // term was getting re-visited as its own spurious one-word "paragraph".
+    if (LEAF_BLOCK_TAGS.has(tag ?? "")) {
+      const text = ownText(el);
+      if (text) visit(el, text, null);
+    }
   }
 }
 

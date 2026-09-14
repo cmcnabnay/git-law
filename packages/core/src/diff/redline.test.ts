@@ -152,6 +152,40 @@ test("computeRedline reports unchanged/changed/added paragraph status", () => {
   assert.deepEqual(paragraphStatus.new, ["unchanged", "changed", "added", "unchanged"]);
 });
 
+test("computeRedline doesn't mismatch renumbered paragraphs after an inserted numbered paragraph", () => {
+  // Inserting a whole new numbered paragraph shifts every numbered
+  // paragraph after it on the new side — paragraph 5 becomes paragraph 6,
+  // etc — even though those paragraphs' actual content is unchanged. The
+  // diff must still recognize them as the same paragraph, not treat the
+  // number shift as a content change (which used to cascade into pairing
+  // each paragraph with the wrong neighbor and duplicating text).
+  const oldText =
+    "1. First paragraph unchanged.\n\n" +
+    "2. Second paragraph unchanged.\n\n" +
+    "3. Third paragraph unchanged.";
+  const newText =
+    "1. First paragraph unchanged.\n\n" +
+    "2. Second paragraph unchanged.\n\n" +
+    "3. A brand new inserted paragraph.\n\n" +
+    "4. Third paragraph unchanged.";
+
+  const { changes, paragraphStatus } = computeRedline(oldText, newText);
+
+  assert.deepEqual(paragraphStatus.old, ["unchanged", "unchanged", "unchanged"]);
+  assert.deepEqual(paragraphStatus.new, ["unchanged", "unchanged", "added", "unchanged"]);
+
+  const added = changes.filter((c) => c.added).map((c) => c.value.trim());
+  const removed = changes.filter((c) => c.removed).map((c) => c.value.trim());
+  assert.deepEqual(added, ["3. A brand new inserted paragraph."]);
+  assert.deepEqual(removed, []);
+
+  // The renumbered final paragraph must appear exactly once, with its new
+  // number, not duplicated or glued onto another paragraph's text.
+  const fullText = changes.map((c) => c.value).join("");
+  assert.equal(fullText.match(/Third paragraph unchanged\./g)?.length, 1);
+  assert.ok(fullText.includes("4. Third paragraph unchanged."));
+});
+
 test("computeRedline keeps a lightly edited paragraph as a precise word-level diff", () => {
   const { changes } = computeRedline(
     "The Recipient shall keep the Confidential Information secret for one year.",

@@ -127,6 +127,20 @@ function splitParagraphs(text: string): string[] {
   return text.split("\n\n").filter((p) => p.length > 0);
 }
 
+// htmlToNumberedText prefixes a numbered paragraph with e.g. "5. " — a
+// number a browser (re-)computes fresh per side from each version's own
+// <ol> nesting, so inserting or removing just one numbered paragraph
+// renumbers every one after it on that side. Comparing paragraphs by their
+// exact text would then treat every later paragraph as "changed" — or worse,
+// pair it with the wrong counterpart — purely because its number shifted,
+// even though its actual content didn't. Stripping the number before
+// comparing keeps matching anchored on content; the number each side
+// actually renders is still what ends up in the output, since it's part of
+// the paragraph text itself, only the *comparison* ignores it.
+function stripParagraphNumber(paragraph: string): string {
+  return paragraph.replace(/^\d+\.\s+/, "");
+}
+
 function withTrailingBreak(value: string): string {
   return value + "\n\n";
 }
@@ -150,7 +164,9 @@ function withTrailingBreak(value: string): string {
 export function computeRedline(oldText: string, newText: string): RedlineDiff {
   const oldParagraphs = splitParagraphs(oldText);
   const newParagraphs = splitParagraphs(newText);
-  const paragraphChanges = diffArrays(oldParagraphs, newParagraphs);
+  const paragraphChanges = diffArrays(oldParagraphs, newParagraphs, {
+    comparator: (a, b) => stripParagraphNumber(a) === stripParagraphNumber(b),
+  });
 
   const changes: Change[] = [];
   const stats = { added: 0, removed: 0 };
