@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type Repo } from "../api/client.js";
+import { useSetRepoHeaderName } from "../context/repoHeader.js";
 
 const SUPPORTED_EXTENSIONS = [".docx", ".doc"];
 
@@ -23,6 +24,8 @@ export function BlobPage() {
     if (!repoId) return;
     api.getRepo(repoId).then(setRepo).catch((e) => setError(e.message));
   }, [repoId]);
+
+  useSetRepoHeaderName(repo?.name ?? null);
 
   useEffect(() => {
     if (!repoId || !ref || !path) return;

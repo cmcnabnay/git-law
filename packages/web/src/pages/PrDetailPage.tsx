@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, type PrDetail, type Repo } from "../api/client.js";
 import { RedlineDiffView } from "../components/RedlineDiffView.js";
+import { useSetRepoHeaderName } from "../context/repoHeader.js";
 
 const EVENT_LABEL: Record<string, string> = {
   created: "opened this pull request",
@@ -106,6 +107,8 @@ export function PrDetailPage() {
       setDeleting(false);
     }
   }
+
+  useSetRepoHeaderName(repo?.name ?? null);
 
   if (error && !detail) return <p style={{ color: "var(--danger)" }}>{error}</p>;
   if (!detail || !repo) return <p>Loading...</p>;

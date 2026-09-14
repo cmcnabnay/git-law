@@ -6,23 +6,41 @@ import { RepoListPage } from "./pages/RepoListPage.js";
 import { RepoDetailPage } from "./pages/RepoDetailPage.js";
 import { PrDetailPage } from "./pages/PrDetailPage.js";
 import { BlobPage } from "./pages/BlobPage.js";
+import { RepoHeaderProvider, useRepoHeaderName } from "./context/repoHeader.js";
+
+function Header() {
+  const repoName = useRepoHeaderName();
+  return (
+    <header className="topbar">
+      <h1>
+        <Link to="/" className="brand">
+          Git Law
+        </Link>
+        {repoName && (
+          <>
+            <span className="breadcrumb-sep">/</span>
+            <span className="breadcrumb-repo">{repoName}</span>
+          </>
+        )}
+      </h1>
+    </header>
+  );
+}
 
 function App() {
   return (
     <BrowserRouter>
-      <header className="topbar">
-        <h1>
-          <Link to="/">Git Law</Link>
-        </h1>
-      </header>
-      <div className="container">
-        <Routes>
-          <Route path="/" element={<RepoListPage />} />
-          <Route path="/repos/:repoId" element={<RepoDetailPage />} />
-          <Route path="/repos/:repoId/blob" element={<BlobPage />} />
-          <Route path="/repos/:repoId/prs/:prId" element={<PrDetailPage />} />
-        </Routes>
-      </div>
+      <RepoHeaderProvider>
+        <Header />
+        <div className="container">
+          <Routes>
+            <Route path="/" element={<RepoListPage />} />
+            <Route path="/repos/:repoId" element={<RepoDetailPage />} />
+            <Route path="/repos/:repoId/blob" element={<BlobPage />} />
+            <Route path="/repos/:repoId/prs/:prId" element={<PrDetailPage />} />
+          </Routes>
+        </div>
+      </RepoHeaderProvider>
     </BrowserRouter>
   );
 }

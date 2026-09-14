@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Repo, type PullRequest, type TreeEntry } from "../api/client.js";
+import { useSetRepoHeaderName } from "../context/repoHeader.js";
+
+type Tab = "files" | "prs" | "settings";
 
 function StatusBadge({ status }: { status: PullRequest["status"] }) {
   return <span className={`badge ${status}`}>{status}</span>;
@@ -57,6 +60,32 @@ function FileRow({ repo, refName, entry }: { repo: Repo; refName: string; entry:
   );
 }
 
+function ClonePopover({ repo, onClose }: { repo: Repo; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const cloneUrl = repo.cloneUrl ?? repo.clonePath ?? repo.bare_path;
+
+  function handleCopy() {
+    navigator.clipboard.writeText(cloneUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  return (
+    <>
+      <div className="popover-backdrop" onClick={onClose} />
+      <div className="popover clone-popover">
+        <strong>Clone</strong>
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <input readOnly className="mono" value={cloneUrl} onFocus={(e) => e.target.select()} />
+          <button onClick={handleCopy}>{copied ? "Copied!" : "Copy"}</button>
+        </div>
+        <p style={{ color: "var(--muted)", fontSize: 12, marginBottom: 0, marginTop: 8 }}>Clone using the web URL.</p>
+      </div>
+    </>
+  );
+}
+
 export function RepoDetailPage() {
   const { repoId } = useParams<{ repoId: string }>();
   const navigate = useNavigate();
@@ -67,6 +96,8 @@ export function RepoDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [tab, setTab] = useState<Tab>("files");
+  const [showClone, setShowClone] = useState(false);
 
   function load() {
     if (!repoId) return;
@@ -106,108 +137,137 @@ export function RepoDetailPage() {
       });
   }
 
+  useSetRepoHeaderName(repo?.name ?? null);
+
   if (error) return <p style={{ color: "var(--danger)" }}>{error}</p>;
   if (!repo) return <p>Loading...</p>;
 
+  const branches = repo.branches ?? [];
+  const currentBranch = branches.find((b) => b.name === (selectedRef ?? repo.default_branch));
+
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2>{repo.name}</h2>
-        <button className="danger" onClick={handleDelete} disabled={deleting}>
-          {deleting ? "Deleting…" : "Delete repo"}
+      <div className="tabs repo-tabs">
+        <button className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
+          Files
+        </button>
+        <button className={tab === "prs" ? "active" : ""} onClick={() => setTab("prs")}>
+          Pull requests{prs.length > 0 ? ` (${prs.length})` : ""}
+        </button>
+        <button className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>
+          Settings
         </button>
       </div>
 
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Clone this repo</h3>
-        <code className="clone-cmd">git clone {repo.cloneUrl ?? repo.clonePath ?? repo.bare_path} {repo.name}</code>
-        <p style={{ color: "var(--muted)", fontSize: 13 }}>
-          To be identified as a specific participant, run <code className="mono">git config user.email "you@example.com"</code>{" "}
-          inside your clone, matching a registered participant below.
-        </p>
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Participants</h3>
-        {(repo.participants ?? []).length === 0 && <p>None registered.</p>}
-        {(repo.participants ?? []).map((p) => (
-          <div key={p.id}>
-            {p.display_name} &lt;{p.email}&gt;
-          </div>
-        ))}
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Branches</h3>
-        {(repo.branches ?? []).map((b) => (
-          <div className="repo-row" key={b.name}>
-            <div>
-              <strong>{b.name}</strong>
-              <div style={{ color: "var(--muted)", fontSize: 13 }}>{b.lastCommitMessage}</div>
+      {tab === "files" && (
+        <div>
+          <div className="repo-toolbar">
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              {branches.length > 0 ? (
+                <select value={selectedRef ?? repo.default_branch} onChange={(e) => setSelectedRef(e.target.value)}>
+                  {branches.map((b) => (
+                    <option key={b.name} value={b.name}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span style={{ color: "var(--muted)" }}>No branches yet</span>
+              )}
+              <span style={{ color: "var(--muted)", fontSize: 13 }}>
+                {branches.length} branch{branches.length === 1 ? "" : "es"}
+              </span>
             </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <span className="mono">{b.headSha.slice(0, 8)}</span>
-              <button
-                className={selectedRef === b.name ? "active" : ""}
-                onClick={() => setSelectedRef(b.name)}
+            <div style={{ position: "relative" }}>
+              <button className="primary" onClick={() => setShowClone((v) => !v)}>
+                Clone
+              </button>
+              {showClone && <ClonePopover repo={repo} onClose={() => setShowClone(false)} />}
+            </div>
+          </div>
+
+          <div className="card">
+            {branches.length === 0 && <p>Nothing pushed to this repo yet — clone it and push to see files here.</p>}
+            {branches.length > 0 && treeError && <p style={{ color: "var(--danger)" }}>{treeError}</p>}
+            {branches.length > 0 && !treeError && tree.length === 0 && <p>No files pushed to this branch yet.</p>}
+            {currentBranch && tree.length > 0 && (
+              <div
+                className="repo-row"
+                style={{ background: "var(--card-alt, rgba(127,127,127,0.08))", borderRadius: 6, padding: "8px 10px", marginBottom: 8 }}
               >
-                Browse files
+                <div>
+                  <strong>{currentBranch.lastCommitAuthorEmail}</strong> <span>{currentBranch.lastCommitMessage}</span>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--muted)", fontSize: 12 }}>
+                  <span className="mono">{currentBranch.headSha.slice(0, 7)}</span>
+                  <span>{timeAgo(currentBranch.lastCommitDate)}</span>
+                </div>
+              </div>
+            )}
+            {tree.map((entry) => (
+              <FileRow key={entry.path} repo={repo} refName={selectedRef ?? repo.default_branch} entry={entry} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "prs" && (
+        <div className="card">
+          {prs.length === 0 && <p>No pull requests yet — push a branch to the repo above to open one.</p>}
+          {prs.map((pr) => (
+            <div className="pr-row" key={pr.id}>
+              <div>
+                <Link to={`/repos/${repo.id}/prs/${pr.id}`}>
+                  <strong>{pr.branch}</strong> → {pr.target_branch}
+                </Link>
+                <div style={{ color: "var(--muted)", fontSize: 13 }}>
+                  by {pr.author_email ?? "unknown"}
+                  {pr.turn_email && pr.status === "open" ? ` · waiting on ${pr.turn_email}` : ""}
+                  {pr.base_branch && pr.base_branch !== pr.target_branch ? ` · vs ${pr.base_branch}` : ""}
+                </div>
+              </div>
+              <StatusBadge status={pr.status} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "settings" && (
+        <div>
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>Repo name</h3>
+            <input readOnly value={repo.name} />
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>Default branch</h3>
+            <input readOnly value={repo.default_branch} />
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>Participants</h3>
+            {(repo.participants ?? []).length === 0 && <p>None registered.</p>}
+            {(repo.participants ?? []).map((p) => (
+              <div key={p.id}>
+                {p.display_name} &lt;{p.email}&gt;
+              </div>
+            ))}
+          </div>
+
+          <div className="card danger-zone">
+            <h3 style={{ marginTop: 0, color: "var(--danger)" }}>Danger zone</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <strong>Delete this repo</strong>
+                <div style={{ color: "var(--muted)", fontSize: 13 }}>Permanently deletes the repo and all its history.</div>
+              </div>
+              <button className="danger" onClick={handleDelete} disabled={deleting}>
+                {deleting ? "Deleting…" : "Delete repo"}
               </button>
             </div>
           </div>
-        ))}
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>
-          Files {selectedRef && <span style={{ color: "var(--muted)", fontWeight: "normal" }}>@ {selectedRef}</span>}
-        </h3>
-        {(repo.branches ?? []).length === 0 && <p>Nothing pushed to this repo yet — clone it and push to see files here.</p>}
-        {(repo.branches ?? []).length > 0 && treeError && <p style={{ color: "var(--danger)" }}>{treeError}</p>}
-        {(repo.branches ?? []).length > 0 && !treeError && tree.length === 0 && <p>No files pushed to this branch yet.</p>}
-        {(() => {
-          const currentBranch = (repo.branches ?? []).find((b) => b.name === (selectedRef ?? repo.default_branch));
-          if (!currentBranch || tree.length === 0) return null;
-          return (
-            <div
-              className="repo-row"
-              style={{ background: "var(--card-alt, rgba(127,127,127,0.08))", borderRadius: 6, padding: "8px 10px", marginBottom: 8 }}
-            >
-              <div>
-                <strong>{currentBranch.lastCommitAuthorEmail}</strong>{" "}
-                <span>{currentBranch.lastCommitMessage}</span>
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--muted)", fontSize: 12 }}>
-                <span className="mono">{currentBranch.headSha.slice(0, 7)}</span>
-                <span>{timeAgo(currentBranch.lastCommitDate)}</span>
-              </div>
-            </div>
-          );
-        })()}
-        {tree.map((entry) => (
-          <FileRow key={entry.path} repo={repo} refName={selectedRef ?? repo.default_branch} entry={entry} />
-        ))}
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Pull requests</h3>
-        {prs.length === 0 && <p>No pull requests yet — push a branch to the repo above to open one.</p>}
-        {prs.map((pr) => (
-          <div className="pr-row" key={pr.id}>
-            <div>
-              <Link to={`/repos/${repo.id}/prs/${pr.id}`}>
-                <strong>{pr.branch}</strong> → {pr.target_branch}
-              </Link>
-              <div style={{ color: "var(--muted)", fontSize: 13 }}>
-                by {pr.author_email ?? "unknown"}
-                {pr.turn_email && pr.status === "open" ? ` · waiting on ${pr.turn_email}` : ""}
-                {pr.base_branch && pr.base_branch !== pr.target_branch ? ` · vs ${pr.base_branch}` : ""}
-              </div>
-            </div>
-            <StatusBadge status={pr.status} />
-          </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

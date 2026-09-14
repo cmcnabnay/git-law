@@ -56,6 +56,24 @@ header.topbar {
 header.topbar h1 {
   margin: 0;
   font-size: 18px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+header.topbar .brand {
+  font-weight: 700;
+  text-decoration: none;
+}
+
+header.topbar .breadcrumb-sep {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+header.topbar .breadcrumb-repo {
+  font-weight: 600;
+  color: var(--fg);
 }
 
 .card {
@@ -181,6 +199,42 @@ input, textarea {
 
 .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
 .tabs button.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+.repo-tabs { border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
+
+.repo-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.repo-toolbar select { width: auto; }
+
+.popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 11;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  padding: 12px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+}
+
+.clone-popover input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+.danger-zone { border-color: var(--danger); }
 
 .limitations {
   font-size: 13px;
