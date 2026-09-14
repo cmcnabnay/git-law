@@ -14,8 +14,13 @@ export function isPreviewableDocument(filePath: string): boolean {
 /** Converts a .docx file's bytes to HTML entirely client-side — the same
  * mammoth conversion the server runs for the Remote tab's preview, run
  * here instead because a Local-tab file lives only in the folder the user
- * picked via File System Access and is never uploaded anywhere. */
+ * picked via File System Access and is never uploaded anywhere.
+ *
+ * Vite resolves mammoth's own "browser" package.json field for us, which
+ * swaps in a build whose `unzip` only recognizes an `arrayBuffer` option —
+ * the Node build's `buffer` option (what @gitlaw/core's server-side
+ * equivalent uses) throws "Could not find file in options" here instead. */
 export async function docxBytesToHtml(bytes: Uint8Array): Promise<string> {
-  const { value } = await mammoth.convertToHtml({ buffer: Buffer.from(bytes) });
+  const { value } = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer as ArrayBuffer });
   return value;
 }
