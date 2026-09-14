@@ -155,7 +155,7 @@ export function RepoDetailPage() {
         </button>
       </div>
 
-      {tab === "local" && <LocalPanel repo={repo} />}
+      {tab === "local" && <LocalPanel repo={repo} onPushed={load} />}
 
       {tab === "remote" && (
         <div>

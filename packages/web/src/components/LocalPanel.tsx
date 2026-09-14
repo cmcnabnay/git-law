@@ -34,7 +34,7 @@ const PLACEHOLDER_IDENTITY = { name: "Git Law user", email: "local@git-law.local
 
 const SUPPORTED = typeof window !== "undefined" && "showDirectoryPicker" in window;
 
-export function LocalPanel({ repo }: { repo: Repo }) {
+export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => void }) {
   const [phase, setPhase] = useState<Phase>("checking");
   const [handle, setHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [permission, setPermission] = useState<PermissionState | null>(null);
@@ -190,6 +190,7 @@ export function LocalPanel({ repo }: { repo: Repo }) {
       const fs = new FsaFs(handle);
       await pushBranch(fs, status.currentBranch);
       await refreshStatus(handle);
+      onPushed?.();
     } catch (e: any) {
       setError(e.message);
     } finally {
