@@ -45,15 +45,19 @@ prsRouter.get<PrParams>(
     const pr = prRepo.get(req.params.prId);
     if (!pr || pr.repo_id !== repo.id) return res.status(404).json({ error: "pull request not found" });
 
-    // ?compareTo=<branch> lets the caller preview the diff against any
-    // branch's current head instead of the PR's stored base_sha — a
-    // display-only override for this one response, never written back to
-    // the PR row (which keeps deciding what it merges into and, by
-    // default, what it diffs against).
-    const compareTo = req.query.compareTo as string | undefined;
-    const useOverride = !!compareTo && branchExists(repo.bare_path, compareTo);
-    const baseSha = useOverride ? branchHeadSha(repo.bare_path, compareTo!) : pr.base_sha;
-    const compareBranch = useOverride ? compareTo! : (pr.base_branch ?? pr.target_branch);
+    // Default comparison point is the PR's base branch's *current* head,
+    // not the pr.base_sha snapshot taken once at PR-creation time — that
+    // stored sha goes stale the moment anyone pushes a new commit to the
+    // base branch afterward (e.g. another redline round on the branch this
+    // PR was opened against), which used to show a spurious "entire file
+    // added" diff until the ?compareTo dropdown was manually reselected.
+    // ?compareTo=<branch> still lets the caller preview against any other
+    // branch's current head instead; nothing here is written back to the
+    // PR row (which keeps deciding what it actually merges into).
+    const compareTo = (req.query.compareTo as string | undefined) ?? pr.base_branch ?? pr.target_branch;
+    const useLiveHead = branchExists(repo.bare_path, compareTo);
+    const baseSha = useLiveHead ? branchHeadSha(repo.bare_path, compareTo) : pr.base_sha;
+    const compareBranch = useLiveHead ? compareTo : (pr.base_branch ?? pr.target_branch);
 
     const diffs: FileDiff[] =
       isRealCommit(pr.head_sha) && isRealCommit(baseSha)
