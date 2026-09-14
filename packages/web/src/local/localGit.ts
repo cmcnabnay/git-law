@@ -23,6 +23,29 @@ export interface LocalFileEntry {
 
 const DIR = "/";
 
+export interface GitIdentity {
+  name: string;
+  email: string;
+}
+
+/** Reads `user.name`/`user.email` from this repo's own `.git/config`.
+ * isomorphic-git never falls back to a machine-wide `~/.gitconfig` — the
+ * File System Access permission is scoped to just this folder, so a fresh
+ * clone on someone else's computer starts with neither field set, even if
+ * they have a global git identity configured elsewhere. */
+export async function getGitIdentity(fs: FsaFs): Promise<GitIdentity> {
+  const [name, email] = await Promise.all([
+    git.getConfig({ fs, dir: DIR, path: "user.name" }),
+    git.getConfig({ fs, dir: DIR, path: "user.email" }),
+  ]);
+  return { name: name ?? "", email: email ?? "" };
+}
+
+export async function setGitIdentity(fs: FsaFs, identity: GitIdentity): Promise<void> {
+  await git.setConfig({ fs, dir: DIR, path: "user.name", value: identity.name });
+  await git.setConfig({ fs, dir: DIR, path: "user.email", value: identity.email });
+}
+
 export async function isGitWorkingRepo(root: FileSystemDirectoryHandle): Promise<boolean> {
   try {
     await root.getDirectoryHandle(".git");

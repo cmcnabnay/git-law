@@ -18,11 +18,19 @@ import {
   syncFromRemote,
   createBranch,
   listFilesAtRef,
+  getGitIdentity,
+  setGitIdentity,
   type LocalStatus,
   type LocalFileEntry,
 } from "../local/localGit.js";
 
 type Phase = "checking" | "no-handle" | "needs-permission" | "not-a-repo" | "ready";
+
+// Prototype-only stand-in identity: the Local tab has no login, so there's
+// no real per-person identity to ask for. Silently written into a folder's
+// .git/config the first time it's missing, so isomorphic-git's commit
+// never throws — see getGitIdentity/setGitIdentity in local/localGit.ts.
+const PLACEHOLDER_IDENTITY = { name: "Git Law user", email: "local@git-law.local" };
 
 const SUPPORTED = typeof window !== "undefined" && "showDirectoryPicker" in window;
 
@@ -71,6 +79,11 @@ export function LocalPanel({ repo }: { repo: Repo }) {
     if (!isRepo) {
       setPhase("not-a-repo");
       return;
+    }
+    const fs = new FsaFs(dirHandle);
+    const identity = await getGitIdentity(fs);
+    if (!identity.name || !identity.email) {
+      await setGitIdentity(fs, PLACEHOLDER_IDENTITY);
     }
     setPhase("ready");
     await refreshStatus(dirHandle);
