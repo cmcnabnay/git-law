@@ -151,7 +151,7 @@ export function PrDetailPage() {
           ) : (
             <div className="formatted-columns">
               <div className="formatted-view">
-                <h4>Before ({pr.target_branch})</h4>
+                <h4>Before ({pr.base_branch ?? pr.target_branch})</h4>
                 <div dangerouslySetInnerHTML={{ __html: diff.oldHtml ?? "<p><em>(file did not exist)</em></p>" }} />
               </div>
               <div className="formatted-view">
@@ -162,7 +162,7 @@ export function PrDetailPage() {
           )}
 
           <div style={{ marginTop: 12 }}>
-            <a href={api.blobUrl(repo.id, pr.base_sha, diff.path)}>Download {pr.target_branch} version</a>
+            <a href={api.blobUrl(repo.id, pr.base_sha, diff.path)}>Download {pr.base_branch ?? pr.target_branch} version</a>
             {" · "}
             <a href={api.blobUrl(repo.id, pr.head_sha, diff.path)}>Download {pr.branch} version</a>
           </div>
