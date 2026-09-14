@@ -434,6 +434,7 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
         <h3 style={{ marginTop: 0 }}>
           Files {status.currentBranch && <span style={{ color: "var(--muted)", fontWeight: "normal" }}>@ {status.currentBranch}</span>}
         </h3>
+
         {treeError && <p style={{ color: "var(--danger)" }}>{treeError}</p>}
         {!treeError && tree.length === 0 && <p>No files on this branch yet.</p>}
         {tree.map((entry) => (
@@ -444,12 +445,7 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
             style={{ cursor: "pointer", background: previewPath === entry.path ? "var(--card-alt, rgba(127,127,127,0.08))" : undefined }}
           >
             <div>
-              {/* File System Access never exposes the real absolute OS path (by
-                  design, for privacy) — this is the picked folder's name plus the
-                  path within it, the most specific location the browser can know. */}
-              <span className="mono">
-                {handle?.name}/{entry.path}
-              </span>
+              <span className="mono">{entry.path}</span>
               <div style={{ color: "var(--muted)", fontSize: 12 }}>
                 {formatBytes(entry.size)}
                 {entry.mtimeMs > 0 && <> · {new Date(entry.mtimeMs).toLocaleString()}</>}
