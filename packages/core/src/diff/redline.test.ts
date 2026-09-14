@@ -40,4 +40,43 @@ test("computeRedline keeps unchanged paragraphs intact around a heavily reworded
 
   const introChunk = unchanged.find((c) => c.value.includes("Intro paragraph"))!;
   assert.equal(introChunk.value.trim(), "Intro paragraph that stays the same across both versions.");
+
+  // The rewritten middle paragraph itself should read as one clean
+  // strikethrough block followed by one clean inserted block, not a
+  // scrambled word-by-word interleaving of the two unrelated sentences.
+  const removed = changes.filter((c) => c.removed);
+  const added = changes.filter((c) => c.added);
+  assert.equal(removed.length, 1);
+  assert.equal(added.length, 1);
+  assert.ok(removed[0].value.includes("subject to any confidentiality obligation"));
+  assert.ok(added[0].value.includes("otherwise reflects, to any degree"));
+});
+
+test("computeRedline diffs at clause granularity, leaving unrelated clauses in the same paragraph untouched", () => {
+  const oldText = "First clause, second clause, this is the old ending clause.";
+  const newText = "First clause, second clause, this is a totally different unrelated new ending.";
+
+  const { changes } = computeRedline(oldText, newText);
+  const unchangedText = changes
+    .filter((c) => !c.added && !c.removed)
+    .map((c) => c.value)
+    .join("");
+  const removed = changes.filter((c) => c.removed).map((c) => c.value);
+  const added = changes.filter((c) => c.added).map((c) => c.value);
+
+  assert.ok(unchangedText.includes("First clause,"));
+  assert.ok(unchangedText.includes("second clause,"));
+  assert.deepEqual(removed, ["this is the old ending clause."]);
+  assert.deepEqual(added, ["this is a totally different unrelated new ending."]);
+});
+
+test("computeRedline keeps a lightly edited paragraph as a precise word-level diff", () => {
+  const { changes } = computeRedline(
+    "The Recipient shall keep the Confidential Information secret for one year.",
+    "The Recipient shall keep the Confidential Information secret for TWO years."
+  );
+  const removed = changes.filter((c) => c.removed).map((c) => c.value);
+  const added = changes.filter((c) => c.added).map((c) => c.value);
+  assert.deepEqual(removed, ["one", "year"]);
+  assert.deepEqual(added, ["TWO", "years"]);
 });
