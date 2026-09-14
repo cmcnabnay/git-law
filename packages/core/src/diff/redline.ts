@@ -62,8 +62,37 @@ function wordDiffOrReplace(oldClause: string, newClause: string): Change[] {
 // falls out as its own trailing whitespace-only "clause", which matches
 // identically on both sides and so never affects rendering). Concatenating
 // the pieces back together reproduces the original text exactly.
+//
+// Punctuation inside a bracketed placeholder — `[Data Center, LLC]`, `[2722
+// Travis, Houston TX 77002]` — is never a clause boundary: it's part of one
+// blank being filled in, not a separator between clauses. Splitting there
+// anyway is exactly what broke a fill-in-the-blank paragraph: a value with
+// its own internal comma turns one old clause into several new ones, and
+// that clause-count mismatch is what made the pairing below match unrelated
+// fragments against each other. A plain non-regex scan (rather than trying
+// to teach the regex about bracket depth) tracks whether each character
+// falls inside `[...]` and only treats , . : ; as delimiters outside it.
 function splitClauses(text: string): string[] {
-  return text.match(/[^,.:;]*[,.:;]+["']?[ \t]*|[^,.:;]+$/g) ?? [text];
+  const clauses: string[] = [];
+  let start = 0;
+  let bracketDepth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "[") {
+      bracketDepth++;
+    } else if (ch === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+    } else if (bracketDepth === 0 && ",.:;".includes(ch)) {
+      let end = i + 1;
+      if (end < text.length && (text[end] === '"' || text[end] === "'")) end++;
+      while (end < text.length && (text[end] === " " || text[end] === "\t")) end++;
+      clauses.push(text.slice(start, end));
+      start = end;
+      i = end - 1;
+    }
+  }
+  if (start < text.length) clauses.push(text.slice(start));
+  return clauses.length ? clauses : [text];
 }
 
 // Two clauses count as the same for matching purposes even if only their

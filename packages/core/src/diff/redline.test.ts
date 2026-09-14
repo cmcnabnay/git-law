@@ -190,6 +190,28 @@ test("computeRedline doesn't mismatch renumbered paragraphs after an inserted nu
   assert.ok(fullText.includes("Third paragraph unchanged."));
 });
 
+test("computeRedline doesn't split a clause on a comma inside a bracketed placeholder", () => {
+  // A comma inside a filled-in template blank — an address, a company name
+  // — is part of that one value, not a clause boundary. Splitting there
+  // anyway mismatches the clause counts between old and new (one blank
+  // becomes several "clauses"), which is exactly what made two unrelated
+  // placeholders get paired against each other.
+  const oldText = "and [•], a [•] [•] located at [•].";
+  const newText = "and [Data Center, LLC], a [Texas Limited Liability Company] [] located at [2722 Travis, Houston TX 77002].";
+
+  const { changes } = computeRedline(oldText, newText);
+  const removed = changes.filter((c) => c.removed).map((c) => c.value);
+  const added = changes.filter((c) => c.added).map((c) => c.value);
+
+  assert.deepEqual(removed, ["•", "•", "•", "•"]);
+  assert.deepEqual(added, ["Data Center, LLC", "Texas Limited Liability Company", "2722 Travis, Houston TX 77002"]);
+
+  // Each blank's whole filled-in value must appear as a single addition —
+  // not torn apart at its own internal comma.
+  assert.ok(added.some((a) => a === "Data Center, LLC"));
+  assert.ok(added.some((a) => a === "2722 Travis, Houston TX 77002"));
+});
+
 test("computeRedline doesn't join multiple unmatched clauses into one blob before diffing", () => {
   // A comma inserted mid-sentence on the new side splits what was one old
   // clause into three new clauses. diffArrays groups all three into a
