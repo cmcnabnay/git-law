@@ -1,4 +1,9 @@
 import mammoth from "mammoth";
+// Deep import, not the package's own index — that barrel also re-exports
+// Node-only modules (better-sqlite3, fs-based config, etc.) that would
+// break the browser bundle. This one file only imports node-html-parser,
+// which is browser-safe.
+import { fixOrderedListNumbering } from "@gitlaw/core/src/diff/numberedText.js";
 
 const PREVIEWABLE_EXTENSIONS = [".docx"];
 
@@ -22,5 +27,5 @@ export function isPreviewableDocument(filePath: string): boolean {
  * equivalent uses) throws "Could not find file in options" here instead. */
 export async function docxBytesToHtml(bytes: Uint8Array): Promise<string> {
   const { value } = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer as ArrayBuffer });
-  return value;
+  return fixOrderedListNumbering(value);
 }

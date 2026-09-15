@@ -106,6 +106,52 @@ export function htmlToNumberedText(html: string): string {
   return paragraphs.join("\n\n") + (paragraphs.length ? "\n\n" : "");
 }
 
+/** Walks the same way `forEachBlock` numbers list items, but mutates the
+ * HTML itself: sets an explicit `start` attribute on any <ol> that
+ * continues a sibling list mammoth split apart, so a plain rendered
+ * <ol>/<li> — no per-item numbering logic involved, just the browser's own
+ * native list rendering — shows the same continuous numbering the redline
+ * text view computes, instead of restarting at 1. A genuinely nested <ol>
+ * (a Word sub-list) is left untouched, since the browser already renders
+ * that correctly starting at 1. */
+function fixListStarts(node: HTMLElement | Node): void {
+  let numberedCounter = 0;
+  for (const child of node.childNodes) {
+    if (child.nodeType !== NodeType.ELEMENT_NODE) continue;
+    const el = child as HTMLElement;
+    const tag = el.tagName?.toLowerCase();
+
+    if (tag === NUMBERED_TAG || tag === BULLET_TAG) {
+      let n = numberedCounter;
+      if (tag === NUMBERED_TAG && numberedCounter > 0) {
+        el.setAttribute("start", String(numberedCounter + 1));
+      }
+      for (const itemNode of el.childNodes) {
+        if (itemNode.nodeType !== NodeType.ELEMENT_NODE) continue;
+        const item = itemNode as HTMLElement;
+        if (item.tagName?.toLowerCase() !== "li") continue;
+        n++;
+        fixListStarts(item);
+      }
+      if (tag === NUMBERED_TAG) numberedCounter = n;
+      continue;
+    }
+  }
+}
+
+/** Fixes up mammoth's raw docx-to-html output so a plain rendered view
+ * (nothing but `dangerouslySetInnerHTML` and the browser's own <ol> CSS)
+ * shows correct numbering even where mammoth split one continuous Word
+ * list into multiple sibling <ol> elements — see fixListStarts. Apply this
+ * once, right after mammoth's conversion, before the HTML reaches any
+ * renderer (the Remote tab's blob preview, the Local tab's preview, and
+ * the PR redline view via annotateParagraphHtml all share this path). */
+export function fixOrderedListNumbering(html: string): string {
+  const root = parse(html);
+  fixListStarts(root);
+  return root.toString();
+}
+
 export type ParagraphStatus = "unchanged" | "changed" | "removed" | "added";
 
 /** Marks each paragraph-like block of `html`, in the same document order
