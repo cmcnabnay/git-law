@@ -244,7 +244,7 @@ export function PrDetailPage() {
       </div>
 
       <p className="limitations">
-        Note: the redline diff compares extracted text only — formatting changes (bold, tables, styles) aren't
+        Note: the redline diff compares extracted text only — formatting changes (bold, styles) aren't
         shown as diff markup, though the Formatted tab shows each version's real formatting. Live editing in
         Word with tracked changes isn't supported yet; use the download links above to review a version
         manually in Word.

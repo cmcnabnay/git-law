@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computeRedline } from "./redline.js";
+import { ROW_START, CELL_SEP } from "./tableMarkers.js";
 
 test("computeRedline marks a substituted word as removed+added", () => {
   const { changes, stats } = computeRedline("The term is one year.", "The term is TWO years.");
@@ -256,4 +257,29 @@ test("computeRedline keeps a lightly edited paragraph as a precise word-level di
   const added = changes.filter((c) => c.added).map((c) => c.value);
   assert.deepEqual(removed, ["one", "year"]);
   assert.deepEqual(added, ["TWO", "years"]);
+});
+
+test("computeRedline shows a changed figure as the whole old amount struck and the whole new one inserted", () => {
+  const { changes } = computeRedline(
+    "The price is $1,100 per unit for 35,000 units.",
+    "The price is $900 per unit for 35,000 units."
+  );
+  assert.deepEqual(changes.filter((c) => c.removed).map((c) => c.value), ["$1,100"]);
+  assert.deepEqual(changes.filter((c) => c.added).map((c) => c.value), ["$900"]);
+});
+
+test("computeRedline diffs table rows cell-by-cell and keeps the row/cell markers", () => {
+  const row = (...cells: string[]) => ROW_START + cells.join(CELL_SEP);
+  const oldText = [row("GPU Type", "Number", "Price"), row("Type A", "10,000", "$1,100"), row("Type B", "35,000", "$550")].join("\n\n");
+  const newText = [row("GPU Type", "Number", "Price"), row("Type A", "10,000", "$900"), row("Type B", "35,000", "$550")].join("\n\n");
+  const { changes, paragraphStatus } = computeRedline(oldText, newText);
+
+  assert.deepEqual(paragraphStatus.new, ["unchanged", "changed", "unchanged"]);
+  assert.deepEqual(changes.filter((c) => c.removed).map((c) => c.value), ["$1,100"]);
+  assert.deepEqual(changes.filter((c) => c.added).map((c) => c.value), ["$900"]);
+  // Reassembling the changed row's new side reproduces it cell-for-cell.
+  const start = changes.findIndex((c, i) => c.value === ROW_START && changes[i + 1]?.value === "Type A");
+  const end = changes.findIndex((c, i) => i > start && c.value === "\n\n");
+  const newRow = changes.slice(start, end).filter((c) => !c.removed).map((c) => c.value).join("");
+  assert.equal(newRow, row("Type A", "10,000", "$900"));
 });

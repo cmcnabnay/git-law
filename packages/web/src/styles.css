@@ -155,6 +155,28 @@ input, textarea {
 .redline ins { background: var(--added-bg); color: var(--added-fg); text-decoration: none; }
 .redline del { background: var(--removed-bg); color: var(--removed-fg); }
 .redline { white-space: pre-wrap; line-height: 1.6; }
+/* Tables in both the redline and the formatted view get visible cell
+   borders — mammoth emits bare <table>/<td> with no styling, so without
+   this every row reads as one run-on line of text. */
+.redline-table,
+.formatted-view table {
+  border-collapse: collapse;
+  margin: 0 0 1em;
+  white-space: normal;
+}
+.redline-table td,
+.formatted-view td,
+.formatted-view th {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  vertical-align: top;
+}
+.redline-table tr.changed td { background: color-mix(in srgb, var(--added-bg) 35%, transparent); }
+.formatted-view td p { margin: 0; }
+.formatted-view tr.redline-removed td { background: var(--removed-bg); }
+.formatted-view tr.redline-added td { background: var(--added-bg); }
+.formatted-view.before tr.redline-changed td { background: var(--removed-bg); }
+.formatted-view.after tr.redline-changed td { background: var(--added-bg); }
 
 .event {
   padding: 8px 0;

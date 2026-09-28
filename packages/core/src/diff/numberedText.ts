@@ -1,4 +1,5 @@
 import { parse, NodeType, type HTMLElement, type Node } from "node-html-parser";
+import { ROW_START, CELL_SEP } from "./tableMarkers.js";
 
 const BULLET_TAG = "ul";
 const NUMBERED_TAG = "ol";
@@ -26,11 +27,48 @@ function ownText(el: HTMLElement): string {
   return text.trim().replace(/\n{2,}/g, " ");
 }
 
+function childElements(el: HTMLElement, tags: string[]): HTMLElement[] {
+  return el.childNodes.filter(
+    (n): n is HTMLElement => n.nodeType === NodeType.ELEMENT_NODE && tags.includes((n as HTMLElement).tagName?.toLowerCase())
+  );
+}
+
+/** A table's own rows, whether mammoth put them directly under <table> or
+ * inside <thead>/<tbody> — but not rows of a table nested inside a cell. */
+function tableRows(table: HTMLElement): HTMLElement[] {
+  return childElements(table, ["tr", "thead", "tbody", "tfoot"]).flatMap((el) =>
+    el.tagName.toLowerCase() === "tr" ? [el] : childElements(el, ["tr"])
+  );
+}
+
+// Inside a single table cell, a run of tabs or 3+ spaces is how a document
+// fakes columns (e.g. "Type A      10,000      $1,100" typed into one cell)
+// — split those out as their own columns so they line up like real cells.
+const PSEUDO_COLUMN_GAP = /\t+|[  ]{3,}/;
+
+/** One table row as a single redline "paragraph": ROW_START, then each
+ * cell's text separated by CELL_SEP (see tableMarkers.ts). A cell's own
+ * paragraphs are joined with a space rather than run together (textContent
+ * alone would turn "2722 Travis" + "Houston, TX" into "2722 TravisHouston").
+ * Returns "" for a row with no text at all, so it's skipped like any other
+ * empty paragraph. */
+function rowText(row: HTMLElement): string {
+  const cells = childElements(row, ["td", "th"]);
+  const columns = cells.flatMap((cell) => {
+    const blocks = childElements(cell, [...LEAF_BLOCK_TAGS]);
+    const parts = blocks.length ? blocks.map((b) => b.textContent) : [cell.textContent];
+    const text = parts.map((p) => p.trim()).filter(Boolean).join(" ").replace(/\n+/g, " ");
+    return text.split(PSEUDO_COLUMN_GAP);
+  });
+  if (!columns.some((c) => c.trim())) return "";
+  return ROW_START + columns.join(CELL_SEP);
+}
+
 /**
  * Walks the block-level children of `node` in document order, invoking
- * `visit` once per paragraph-like block (a plain <p>/<h1-6>/<table>, or a
- * numbered/bulleted <li>) with its own text and, for a numbered <li>, the
- * number a browser would actually render for it: a sequential counter,
+ * `visit` once per paragraph-like block (a plain <p>/<h1-6>, a
+ * numbered/bulleted <li>, or one row of a <table> — see rowText) with its
+ * own text and, for a numbered <li>, the number a browser would actually render for it: a sequential counter,
  * shared across every top-level <ol> sibling found among `node`'s direct
  * children, but reset to 1 for a genuinely nested <ol> (one found while
  * recursing into an <li> — a fresh `forEachBlock` call, so it gets its own
@@ -73,8 +111,10 @@ function forEachBlock(node: HTMLElement | Node, visit: (el: HTMLElement, text: s
     }
 
     if (tag === "table") {
-      const text = el.textContent.trim();
-      if (text) visit(el, text, null);
+      for (const row of tableRows(el)) {
+        const text = rowText(row);
+        if (text) visit(row, text, null);
+      }
       continue;
     }
 

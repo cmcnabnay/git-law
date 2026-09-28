@@ -1,4 +1,5 @@
-import { diffArrays, diffWordsWithSpace, type Change } from "diff";
+import { Diff, diffArrays, type Change } from "diff";
+import { ROW_START, CELL_SEP } from "./tableMarkers.js";
 
 export type ParagraphStatus = "unchanged" | "changed" | "removed" | "added";
 
@@ -20,6 +21,27 @@ function countWords(s: string): number {
 // unrelated one rather than lightly edited (see wordDiffOrReplace below).
 const REWRITE_THRESHOLD = 0.4;
 
+// jsdiff's own word characters (see diffWordsWithSpace), so everything but
+// numbers tokenizes exactly as it would there.
+const WORD_CHARS =
+  "a-zA-Z0-9_\\u{C0}-\\u{FF}\\u{D8}-\\u{F6}\\u{F8}-\\u{2C6}\\u{2C8}-\\u{2D7}\\u{2DE}-\\u{2FF}\\u{1E00}-\\u{1EFF}";
+
+// A number — with its currency sign, thousands separators, decimals and
+// percent sign — as one token: "$1,100", "35,000", "12.5%". A plain word
+// diff splits "$1,100" into "$", "1", ",", "100", so "$1,100" -> "$900"
+// matches up the "$" and renders as "$~~1,100~~900", or worse, matches the
+// "100" of one number against another. A changed figure should instead read
+// as the whole old amount struck and the whole new amount inserted.
+const NUMBER_TOKEN = "[$€£¥]?\\d+(?:[.,]\\d+)*%?";
+
+const numberAwareWordDiff = new Diff();
+numberAwareWordDiff.tokenize = (value: string) =>
+  value.match(new RegExp(`${NUMBER_TOKEN}|(\\r?\\n)|[${WORD_CHARS}]+|[^\\S\\n\\r]+|[^${WORD_CHARS}]`, "ug")) ?? [];
+
+function diffWordsKeepingNumbers(oldText: string, newText: string): Change[] {
+  return numberAwareWordDiff.diff(oldText, newText);
+}
+
 /**
  * Word-diffs a changed clause pair, but falls back to a plain whole-clause
  * replacement when the two are mostly dissimilar.
@@ -35,7 +57,7 @@ const REWRITE_THRESHOLD = 0.4;
  * one another.
  */
 function wordDiffOrReplace(oldClause: string, newClause: string): Change[] {
-  const wordDiff = diffWordsWithSpace(oldClause, newClause);
+  const wordDiff = diffWordsKeepingNumbers(oldClause, newClause);
   const oldWords = countWords(oldClause);
   const newWords = countWords(newClause);
   const unchangedWords = wordDiff
@@ -72,6 +94,15 @@ function wordDiffOrReplace(oldClause: string, newClause: string): Change[] {
 // fragments against each other. A plain non-regex scan (rather than trying
 // to teach the regex about bracket depth) tracks whether each character
 // falls inside `[...]` and only treats , . : ; as delimiters outside it.
+//
+// Likewise a comma or period between two digits ("35,000", "$1,100.50") is
+// a thousands/decimal separator, not a clause boundary — splitting there
+// broke every figure into fragments ("35," + "000") that then got diffed
+// against unrelated fragments of other numbers.
+function isInsideNumber(text: string, i: number): boolean {
+  return (text[i] === "," || text[i] === ".") && /\d/.test(text[i - 1] ?? "") && /\d/.test(text[i + 1] ?? "");
+}
+
 function splitClauses(text: string): string[] {
   const clauses: string[] = [];
   let start = 0;
@@ -82,7 +113,7 @@ function splitClauses(text: string): string[] {
       bracketDepth++;
     } else if (ch === "]") {
       bracketDepth = Math.max(0, bracketDepth - 1);
-    } else if (bracketDepth === 0 && ",.:;".includes(ch)) {
+    } else if (bracketDepth === 0 && ",.:;".includes(ch) && !isInsideNumber(text, i)) {
       let end = i + 1;
       if (end < text.length && (text[end] === '"' || text[end] === "'")) end++;
       while (end < text.length && (text[end] === " " || text[end] === "\t")) end++;
@@ -192,15 +223,72 @@ function withTrailingBreak(value: string): string {
   return value + "\n\n";
 }
 
+function isTableRow(paragraph: string): boolean {
+  return paragraph.startsWith(ROW_START);
+}
+
+function rowCells(paragraph: string): string[] {
+  return paragraph.slice(ROW_START.length).split(CELL_SEP);
+}
+
+/** Lays out one table row's per-cell changes between ROW_START / CELL_SEP
+ * marker changes, closed by its own "\n\n" change — each marker a
+ * standalone unchanged Change, so a renderer can pick the row back apart
+ * into cells by value alone (see tableMarkers.ts). */
+function rowChanges(cells: Change[][]): Change[] {
+  const changes: Change[] = [{ value: ROW_START } as Change];
+  cells.forEach((cell, idx) => {
+    if (idx > 0) changes.push({ value: CELL_SEP } as Change);
+    changes.push(...cell.filter((c) => c.value.length > 0));
+  });
+  changes.push({ value: "\n\n" } as Change);
+  return changes;
+}
+
+/** A paragraph that's wholly unchanged, added, or removed. */
+function wholeParagraph(paragraph: string, flags: { added?: boolean; removed?: boolean }): Change[] {
+  if (isTableRow(paragraph)) {
+    return rowChanges(rowCells(paragraph).map((cell) => [{ ...flags, value: cell } as Change]));
+  }
+  return [{ ...flags, value: withTrailingBreak(paragraph) } as Change];
+}
+
+/** A matched old/new paragraph pair whose text differs. Two table rows are
+ * diffed cell-by-cell against their positional counterpart, so an edit in
+ * one cell can never be matched against text from a neighboring cell. */
+function changedParagraph(oldPara: string, newPara: string): Change[] {
+  if (isTableRow(oldPara) && isTableRow(newPara)) {
+    const oldCells = rowCells(oldPara);
+    const newCells = rowCells(newPara);
+    const cells: Change[][] = [];
+    for (let k = 0; k < Math.max(oldCells.length, newCells.length); k++) {
+      const o = oldCells[k] ?? "";
+      const n = newCells[k] ?? "";
+      cells.push(o === n ? [{ value: o } as Change] : diffParagraph(o, n));
+    }
+    return rowChanges(cells);
+  }
+  if (isTableRow(oldPara) || isTableRow(newPara)) {
+    return [...wholeParagraph(oldPara, { removed: true }), ...wholeParagraph(newPara, { added: true })];
+  }
+  const paraChanges = diffParagraph(oldPara, newPara);
+  return paraChanges.map((c, idx) =>
+    idx === paraChanges.length - 1 ? ({ ...c, value: withTrailingBreak(c.value) } as Change) : c
+  );
+}
+
 /**
  * Word-level diff over plain text extracted from each docx version.
  *
  * Deliberately diffs plain text rather than mammoth's generated HTML:
  * diffing HTML word-by-word risks tearing markup across change boundaries
  * (e.g. an opening <strong> landing only in one diff chunk), producing
- * broken markup. Formatting-level changes (bold/tables/styles) are not
- * shown as diff markup as a result — a separate "formatted view" of each
- * version (see docxToHtml) is offered alongside this as a complement.
+ * broken markup. Formatting-level changes (bold/styles) are not shown as
+ * diff markup as a result — a separate "formatted view" of each version
+ * (see docxToHtml) is offered alongside this as a complement. Table
+ * structure is the exception: each row arrives as its own paragraph with
+ * cell markers (see tableMarkers.ts), is diffed cell-by-cell, and comes
+ * back out with those markers so it can still be rendered as a table.
  *
  * Diffing is done in three passes, each anchored on the one before it so a
  * flat LCS never gets the chance to match content across unrelated regions:
@@ -235,7 +323,7 @@ export function computeRedline(oldText: string, newText: string): RedlineDiff {
       // same way (removed: falsy), so chunk.added decides which this is.
       for (const para of chunk.value as string[]) {
         if (chunk.added) {
-          record({ value: withTrailingBreak(para), added: true, removed: false } as Change);
+          wholeParagraph(para, { added: true }).forEach(record);
           newStatus.push("added");
           continue;
         }
@@ -250,15 +338,11 @@ export function computeRedline(oldText: string, newText: string): RedlineDiff {
         // itself the first "clause" diffParagraph sees) — inconsistent.
         const oldPara = oldParagraphs[oldStatus.length];
         if (oldPara === para) {
-          record({ value: withTrailingBreak(para), added: false, removed: false } as Change);
+          wholeParagraph(para, {}).forEach(record);
           oldStatus.push("unchanged");
           newStatus.push("unchanged");
         } else {
-          const paraChanges = diffParagraph(oldPara, para);
-          paraChanges.forEach((c, idx) => {
-            const isLast = idx === paraChanges.length - 1;
-            record({ ...c, value: isLast ? withTrailingBreak(c.value) : c.value } as Change);
-          });
+          changedParagraph(oldPara, para).forEach(record);
           oldStatus.push("changed");
           newStatus.push("changed");
         }
@@ -279,20 +363,16 @@ export function computeRedline(oldText: string, newText: string): RedlineDiff {
 
     const pairCount = Math.min(removedParas.length, addedParas.length);
     for (let p = 0; p < pairCount; p++) {
-      const paraChanges = diffParagraph(removedParas[p], addedParas[p]);
-      paraChanges.forEach((c, idx) => {
-        const isLast = idx === paraChanges.length - 1;
-        record({ ...c, value: isLast ? withTrailingBreak(c.value) : c.value } as Change);
-      });
+      changedParagraph(removedParas[p], addedParas[p]).forEach(record);
       oldStatus.push("changed");
       newStatus.push("changed");
     }
     for (let p = pairCount; p < removedParas.length; p++) {
-      record({ value: withTrailingBreak(removedParas[p]), added: false, removed: true } as Change);
+      wholeParagraph(removedParas[p], { removed: true }).forEach(record);
       oldStatus.push("removed");
     }
     for (let p = pairCount; p < addedParas.length; p++) {
-      record({ value: withTrailingBreak(addedParas[p]), added: true, removed: false } as Change);
+      wholeParagraph(addedParas[p], { added: true }).forEach(record);
       newStatus.push("added");
     }
   }

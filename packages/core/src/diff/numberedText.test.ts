@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { htmlToNumberedText } from "./numberedText.js";
+import { ROW_START, CELL_SEP } from "./tableMarkers.js";
 
 test("htmlToNumberedText numbers a flat ordered list like a browser renders it", () => {
   const html = "<ol><li>Definitions.</li><li>Confidentiality Obligations.</li><li>Term.</li></ol>";
@@ -58,5 +59,17 @@ test("htmlToNumberedText doesn't spawn a paragraph per bolded term inside a numb
   assert.equal(
     htmlToNumberedText(html),
     '1. May disclose to the other party ("Recipient") who agrees to keep it confidential (the "Purpose").\n\n'
+  );
+});
+
+test("htmlToNumberedText emits one marked paragraph per table row, splitting cells and space-aligned columns", () => {
+  const html =
+    "<table><tr><td><p>Type A              10,000                $1,100</p></td></tr>" +
+    "<tr><td><p> </p></td><td><p>2722 Travis</p><p>Houston, TX 77002</p></td></tr>" +
+    "<tr><td><p> </p></td><td></td></tr></table>";
+  assert.equal(
+    htmlToNumberedText(html),
+    ROW_START + ["Type A", "10,000", "$1,100"].join(CELL_SEP) + "\n\n" +
+      ROW_START + ["", "2722 Travis Houston, TX 77002"].join(CELL_SEP) + "\n\n"
   );
 });
