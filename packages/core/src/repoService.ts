@@ -6,7 +6,8 @@ import fs from "node:fs";
 // any of those contexts (e.g. a leading '-' from the default nanoid alphabet).
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 import { reposRepo, participantsRepo, type Repo } from "./db/repositories.js";
-import { createBareRepo, installPostReceiveHook } from "./git/bareRepo.js";
+import { createBareRepo, installPostReceiveHook, setBareHead } from "./git/bareRepo.js";
+import { branchExists, listBranches } from "./git/branches.js";
 import { bareRepoPath } from "./git/paths.js";
 import { apiBaseUrl, loadConfig } from "./config.js";
 
@@ -50,4 +51,25 @@ export function repairHooks(): void {
   for (const repo of reposRepo.list()) {
     installPostReceiveHook(repo.bare_path, repo.id, apiBaseUrl(config));
   }
+}
+
+/**
+ * Repos are created expecting `main`, but a first push of some other branch
+ * (e.g. `master`) leaves that default pointing at nothing. Like GitHub, adopt
+ * the first branch that actually lands as the default — `pushedBranch` when
+ * called from a push, otherwise an existing branch (preferring `master`) to
+ * heal repos that were pushed before this existed. No-op once the default
+ * branch exists, or while the repo has no branches at all.
+ */
+export function ensureDefaultBranch(repo: Repo, pushedBranch?: string): Repo {
+  if (branchExists(repo.bare_path, repo.default_branch)) return repo;
+  let branch = pushedBranch;
+  if (!branch) {
+    const names = listBranches(repo.bare_path).map((b) => b.name);
+    branch = names.includes("master") ? "master" : names[0];
+  }
+  if (!branch) return repo;
+  reposRepo.setDefaultBranch(repo.id, branch);
+  setBareHead(repo.bare_path, branch);
+  return reposRepo.get(repo.id)!;
 }

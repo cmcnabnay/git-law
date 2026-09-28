@@ -11,6 +11,7 @@ import {
   readWordDocument,
   loadConfig,
   repoCloneUrl,
+  ensureDefaultBranch,
 } from "@gitlaw/core";
 import path from "node:path";
 
@@ -46,8 +47,9 @@ reposRouter.get("/", (_req, res) => {
 });
 
 reposRouter.get("/:repoId", (req, res) => {
-  const repo = reposRepo.get(req.params.repoId);
-  if (!repo) return res.status(404).json({ error: "repo not found" });
+  const found = reposRepo.get(req.params.repoId);
+  if (!found) return res.status(404).json({ error: "repo not found" });
+  const repo = ensureDefaultBranch(found);
   res.json({
     ...repo,
     participants: participantsRepo.listForRepo(repo.id),
@@ -73,8 +75,9 @@ reposRouter.get("/:repoId/branches", (req, res) => {
 });
 
 reposRouter.get("/:repoId/tree", (req, res) => {
-  const repo = reposRepo.get(req.params.repoId);
-  if (!repo) return res.status(404).json({ error: "repo not found" });
+  const found = reposRepo.get(req.params.repoId);
+  if (!found) return res.status(404).json({ error: "repo not found" });
+  const repo = ensureDefaultBranch(found);
   const ref = (req.query.ref as string) || repo.default_branch;
   try {
     res.json(listTree(repo.bare_path, ref));

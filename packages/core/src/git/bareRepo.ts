@@ -7,6 +7,11 @@ export function createBareRepo(barePath: string, defaultBranch: string = "main")
   execFileSync("git", ["init", "--bare", "-b", defaultBranch, barePath]);
 }
 
+/** Points the bare repo's HEAD at `branch`, so clones check it out by default. */
+export function setBareHead(barePath: string, branch: string): void {
+  execFileSync("git", ["-C", barePath, "symbolic-ref", "HEAD", `refs/heads/${branch}`]);
+}
+
 /**
  * Installs a dependency-free Node.js post-receive hook (no bash/curl) that
  * notifies the Git Law API of every ref update. The hook never fails the

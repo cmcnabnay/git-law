@@ -10,7 +10,7 @@ process.env.GITLAW_HOME = tmp;
 
 const { initDataDir } = await import("../config.js");
 const { createRepo } = await import("../repoService.js");
-const { participantsRepo, prRepo } = await import("../db/repositories.js");
+const { participantsRepo, prRepo, reposRepo } = await import("../db/repositories.js");
 const { createOrUpdatePr, rejectPr } = await import("./prService.js");
 
 initDataDir(4600);
@@ -120,6 +120,22 @@ test("push to the default branch never creates a PR", () => {
   const result = createOrUpdatePr(repo.id, repo.default_branch, "e".repeat(40));
   assert.equal(result, null);
   assert.equal(prRepo.listForRepo(repo.id).length, 0);
+});
+
+test("first push of a non-main branch becomes the default branch instead of a PR", () => {
+  const repo = createRepo({ name: "test-repo-master" });
+  const commitSha = execFileSync(
+    "git",
+    ["-C", repo.bare_path, "commit-tree", EMPTY_TREE_SHA, "-m", "seed"],
+    { encoding: "utf8" }
+  ).trim();
+  execFileSync("git", ["-C", repo.bare_path, "update-ref", "refs/heads/master", commitSha]);
+
+  assert.equal(createOrUpdatePr(repo.id, "master", commitSha), null);
+  assert.equal(prRepo.listForRepo(repo.id).length, 0);
+  assert.equal(reposRepo.get(repo.id)!.default_branch, "master");
+  const head = execFileSync("git", ["-C", repo.bare_path, "symbolic-ref", "HEAD"], { encoding: "utf8" }).trim();
+  assert.equal(head, "refs/heads/master");
 });
 
 after(() => {

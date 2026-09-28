@@ -3,6 +3,7 @@ import { commitAuthorEmail } from "../git/bareRepo.js";
 import { detectParentBranch } from "../git/branches.js";
 import { mergeBranchIntoMain } from "../git/merge.js";
 import { nextTurnAfterPush } from "./turnLogic.js";
+import { ensureDefaultBranch } from "../repoService.js";
 
 // Git signals "this ref was deleted" in a push update by sending the
 // all-zero object id as the new sha, instead of a real commit sha.
@@ -22,7 +23,7 @@ const ZERO_SHA_PATTERN = /^0+$/;
  * breaking any later attempt to diff it.
  */
 export function createOrUpdatePr(repoId: string, branch: string, newSha: string): PullRequest | null {
-  const repo = reposRepo.get(repoId);
+  let repo = reposRepo.get(repoId);
   if (!repo) throw new Error(`Unknown repo: ${repoId}`);
   if (branch === repo.default_branch) return null;
 
@@ -37,6 +38,12 @@ export function createOrUpdatePr(repoId: string, branch: string, newSha: string)
     }
     return null; // branch deleted with no open/rejected PR on it — nothing to do
   }
+
+  // First push of a branch other than the configured default (e.g. `master`
+  // into a repo expecting `main`): that branch becomes the default rather
+  // than a PR against a branch that doesn't exist.
+  repo = ensureDefaultBranch(repo, branch);
+  if (branch === repo.default_branch) return null;
 
   const authorEmail = commitAuthorEmail(repo.bare_path, newSha);
 

@@ -73,6 +73,9 @@ export const reposRepo = {
   list(): Repo[] {
     return getDb().prepare(`SELECT * FROM repos ORDER BY created_at DESC`).all() as Repo[];
   },
+  setDefaultBranch(id: string, branch: string): void {
+    getDb().prepare(`UPDATE repos SET default_branch = ? WHERE id = ?`).run(branch, id);
+  },
   /** Cascades to participants, pull_requests, and pr_events via their
    * ON DELETE CASCADE foreign keys — does not touch the bare repo on disk. */
   delete(id: string): void {
