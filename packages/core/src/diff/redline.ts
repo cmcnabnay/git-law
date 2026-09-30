@@ -667,9 +667,13 @@ function changedParagraph(oldPara: string, newPara: string, granularity: Redline
     return [...wholeParagraph(oldPara, { removed: true }), ...wholeParagraph(newPara, { added: true })];
   }
   const paraChanges = diffParagraph(oldPara, newPara, granularity);
-  return paraChanges.map((c, idx) =>
-    idx === paraChanges.length - 1 ? ({ ...c, value: withTrailingBreak(c.value) } as Change) : c
-  );
+  // The paragraph break is on both sides, so it may only join the last
+  // change if that change is unchanged text — tacked onto a removed (or
+  // added) last sentence, the break would vanish from the other side and
+  // run this paragraph into the next one.
+  const last = paraChanges[paraChanges.length - 1];
+  if (!last || last.added || last.removed) return [...paraChanges, { value: "\n\n" } as Change];
+  return [...paraChanges.slice(0, -1), { ...last, value: withTrailingBreak(last.value) } as Change];
 }
 
 /**

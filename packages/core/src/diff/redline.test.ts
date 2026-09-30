@@ -433,3 +433,21 @@ test("sentence mode shows replaced sentences as one struck block then one insert
     "Seller estimates delivery. [-Seller shall not be liable for any delay in delivery or loss in transit.-]{+Seller shall deliver the goods at the delivery location on time. Seller shall be responsible for the transportation of the goods.+}"
   );
 });
+
+test("deleting a paragraph's last sentence keeps the break before the next paragraph on both sides", () => {
+  const oldText = "Remedies are exclusive. Buyer has no right to return Goods.\n\n7. Taxes. Prices exclude taxes.\n\n";
+  const newText = "Remedies are exclusive.\n\n7. Taxes. Prices exclude taxes.\n\n";
+  for (const granularity of ["sentence", "clause"] as const) {
+    const { changes } = computeRedline(oldText, newText, granularity);
+    assert.equal(changes.filter((c) => !c.removed).map((c) => c.value).join(""), newText);
+    assert.match(changes.filter((c) => !c.added).map((c) => c.value).join(""), /Goods\.\n\n7\. Taxes/);
+  }
+});
+
+test("replacing a paragraph's last sentence keeps the break on the old side too", () => {
+  const oldText = "Alpha. Delivery is due in June.\n\nBeta.\n\n";
+  const newText = "Alpha. Delivery is due whenever Seller likes, at its sole discretion!\n\nBeta.\n\n";
+  const { changes } = computeRedline(oldText, newText);
+  assert.equal(changes.filter((c) => !c.removed).map((c) => c.value).join(""), newText);
+  assert.equal(changes.filter((c) => !c.added).map((c) => c.value).join(""), oldText);
+});
