@@ -122,6 +122,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ actorEmail, comment }),
     }),
+  createRevisionBranch: (repoId: string, prId: string, branch: string) =>
+    request<{ branch: string; sourcePr: PullRequest }>(`/repos/${repoId}/prs/${prId}/revision-branch`, {
+      method: "POST",
+      body: JSON.stringify({ branch }),
+    }),
+  getBranchOrigin: (repoId: string, branch: string) =>
+    request<{ pr: PullRequest | null }>(`/repos/${repoId}/branch-origin?branch=${encodeURIComponent(branch)}`),
   addComment: (repoId: string, prId: string, actorEmail: string, comment: string) =>
     request<{ pr: PullRequest; events: PrEvent[] }>(`/repos/${repoId}/prs/${prId}/comments`, {
       method: "POST",

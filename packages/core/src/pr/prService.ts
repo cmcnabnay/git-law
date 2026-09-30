@@ -1,6 +1,6 @@
-import { reposRepo, prRepo, eventsRepo, type PullRequest } from "../db/repositories.js";
+import { reposRepo, prRepo, eventsRepo, branchOriginsRepo, type PullRequest } from "../db/repositories.js";
 import { commitAuthorEmail } from "../git/bareRepo.js";
-import { detectParentBranch } from "../git/branches.js";
+import { detectParentBranch, createBranchAt } from "../git/branches.js";
 import { mergeBranchIntoMain } from "../git/merge.js";
 import { nextTurnAfterPush } from "./turnLogic.js";
 import { ensureDefaultBranch } from "../repoService.js";
@@ -96,6 +96,19 @@ export function rejectPr(prId: string, actorEmail: string | null, comment: strin
   prRepo.setTurn(pr.id, pr.author_email);
   eventsRepo.insert({ prId: pr.id, type: "rejected", actorEmail, comment });
   return prRepo.get(pr.id)!;
+}
+
+/** Creates `newBranch` at the PR branch's current head, so the rejected
+ * draft can be revised on a fresh branch, and records the PR it came from
+ * (see branchOriginsRepo) so the Local tab can show that PR's redline. */
+export function createRevisionBranch(prId: string, newBranch: string): { branch: string; sourcePr: PullRequest } {
+  const pr = prRepo.get(prId);
+  if (!pr) throw new Error(`Unknown pull request: ${prId}`);
+  const repo = reposRepo.get(pr.repo_id);
+  if (!repo) throw new Error(`Unknown repo: ${pr.repo_id}`);
+  createBranchAt(repo.bare_path, newBranch, pr.head_sha);
+  branchOriginsRepo.set(repo.id, newBranch, pr.id);
+  return { branch: newBranch, sourcePr: pr };
 }
 
 export function addComment(prId: string, actorEmail: string | null, comment: string): PullRequest {

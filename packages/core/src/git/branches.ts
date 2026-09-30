@@ -36,6 +36,19 @@ export function branchHeadSha(barePath: string, branch: string): string {
   return execFileSync("git", ["-C", barePath, "rev-parse", branch]).toString().trim();
 }
 
+/** `git branch <name> <startPoint>` in the bare repo. Unlike a push, this
+ * runs no hooks, so no PR is opened for the new branch until someone
+ * actually pushes a commit to it. */
+export function createBranchAt(barePath: string, name: string, startPoint: string): void {
+  try {
+    execFileSync("git", ["check-ref-format", "--branch", name], { stdio: "pipe" });
+  } catch {
+    throw new Error(`"${name}" is not a valid branch name`);
+  }
+  if (branchExists(barePath, name)) throw new Error(`Branch "${name}" already exists`);
+  execFileSync("git", ["-C", barePath, "branch", name, startPoint], { stdio: "pipe" });
+}
+
 export function branchExists(barePath: string, branch: string): boolean {
   try {
     branchHeadSha(barePath, branch);

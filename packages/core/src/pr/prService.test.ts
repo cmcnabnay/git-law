@@ -10,8 +10,8 @@ process.env.GITLAW_HOME = tmp;
 
 const { initDataDir } = await import("../config.js");
 const { createRepo } = await import("../repoService.js");
-const { participantsRepo, prRepo, reposRepo } = await import("../db/repositories.js");
-const { createOrUpdatePr, rejectPr } = await import("./prService.js");
+const { participantsRepo, prRepo, reposRepo, branchOriginsRepo } = await import("../db/repositories.js");
+const { createOrUpdatePr, rejectPr, createRevisionBranch } = await import("./prService.js");
 
 initDataDir(4600);
 
@@ -136,6 +136,29 @@ test("first push of a non-main branch becomes the default branch instead of a PR
   assert.equal(reposRepo.get(repo.id)!.default_branch, "master");
   const head = execFileSync("git", ["-C", repo.bare_path, "symbolic-ref", "HEAD"], { encoding: "utf8" }).trim();
   assert.equal(head, "refs/heads/master");
+});
+
+test("a revision branch starts at the rejected PR's head and remembers that PR", () => {
+  const repo = createRepo({ name: "test-repo-revision" });
+  seedMain(repo.bare_path);
+  const mainSha = execFileSync("git", ["-C", repo.bare_path, "rev-parse", "main"], { encoding: "utf8" }).trim();
+  const featureSha = execFileSync(
+    "git",
+    ["-C", repo.bare_path, "commit-tree", EMPTY_TREE_SHA, "-p", mainSha, "-m", "draft"],
+    { encoding: "utf8" }
+  ).trim();
+  execFileSync("git", ["-C", repo.bare_path, "update-ref", "refs/heads/feature", featureSha]);
+  const pr = createOrUpdatePr(repo.id, "feature", featureSha)!;
+  rejectPr(pr.id, null, "needs work");
+
+  createRevisionBranch(pr.id, "feature-2");
+  const headSha = execFileSync("git", ["-C", repo.bare_path, "rev-parse", "feature-2"], { encoding: "utf8" }).trim();
+  assert.equal(headSha, featureSha);
+  assert.equal(branchOriginsRepo.sourcePr(repo.id, "feature-2")?.id, pr.id);
+  assert.equal(prRepo.listForRepo(repo.id).length, 1, "creating the branch opens no PR until it's pushed");
+
+  assert.throws(() => createRevisionBranch(pr.id, "feature-2"), /already exists/);
+  assert.throws(() => createRevisionBranch(pr.id, "bad..name"), /not a valid branch name/);
 });
 
 after(() => {

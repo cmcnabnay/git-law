@@ -217,6 +217,27 @@ export const prRepo = {
   },
 };
 
+export const branchOriginsRepo = {
+  /** Re-recording a branch name (e.g. one deleted and recreated) points it
+   * at the newer PR. */
+  set(repoId: string, branch: string, sourcePrId: string): void {
+    getDb()
+      .prepare(
+        `INSERT INTO branch_origins (repo_id, branch, source_pr_id) VALUES (?, ?, ?)
+         ON CONFLICT(repo_id, branch) DO UPDATE SET source_pr_id = excluded.source_pr_id, created_at = datetime('now')`
+      )
+      .run(repoId, branch, sourcePrId);
+  },
+  sourcePr(repoId: string, branch: string): PullRequest | undefined {
+    return getDb()
+      .prepare(
+        `SELECT pr.* FROM branch_origins bo JOIN pull_requests pr ON pr.id = bo.source_pr_id
+         WHERE bo.repo_id = ? AND bo.branch = ?`
+      )
+      .get(repoId, branch) as PullRequest | undefined;
+  },
+};
+
 export const eventsRepo = {
   insert(input: {
     prId: string;

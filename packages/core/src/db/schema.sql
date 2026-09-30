@@ -53,5 +53,16 @@ CREATE TABLE IF NOT EXISTS pr_events (
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- A branch created from a rejected PR's branch to revise it (see
+-- createRevisionBranch) remembers which PR it came from, so the Local tab
+-- can show that PR's redline when editing a document on the new branch.
+CREATE TABLE IF NOT EXISTS branch_origins (
+  repo_id      TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+  branch       TEXT NOT NULL,
+  source_pr_id TEXT NOT NULL REFERENCES pull_requests(id) ON DELETE CASCADE,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (repo_id, branch)
+);
+
 CREATE INDEX IF NOT EXISTS idx_pr_repo ON pull_requests(repo_id);
 CREATE INDEX IF NOT EXISTS idx_events_pr ON pr_events(pr_id, created_at);

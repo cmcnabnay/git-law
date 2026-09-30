@@ -6,6 +6,7 @@ import {
   approvePr,
   rejectPr,
   addComment,
+  createRevisionBranch,
   computePrDiff,
   branchExists,
   branchHeadSha,
@@ -111,6 +112,23 @@ prsRouter.post<PrParams>("/:prId/reject", (req, res) => {
 
   const updated = rejectPr(pr.id, req.body?.actorEmail ?? null, req.body?.comment ?? null);
   res.json(updated);
+});
+
+// Branches off the PR's branch so a rejected draft can be revised; the new
+// branch remembers this PR (see GET /repos/:repoId/branch-origin).
+prsRouter.post<PrParams>("/:prId/revision-branch", (req, res) => {
+  const repo = reposRepo.get(req.params.repoId);
+  if (!repo) return res.status(404).json({ error: "repo not found" });
+  const pr = prRepo.get(req.params.prId);
+  if (!pr || pr.repo_id !== repo.id) return res.status(404).json({ error: "pull request not found" });
+  const name = typeof req.body?.branch === "string" ? req.body.branch.trim() : "";
+  if (!name) return res.status(400).json({ error: "branch is required" });
+
+  try {
+    res.status(201).json(createRevisionBranch(pr.id, name));
+  } catch (err) {
+    res.status(422).json({ error: (err as Error).message });
+  }
 });
 
 prsRouter.post<PrParams>("/:prId/comments", (req, res) => {

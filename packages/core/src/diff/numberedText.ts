@@ -1,4 +1,4 @@
-import { parse, NodeType, type HTMLElement, type Node } from "node-html-parser";
+import { parse, NodeType, type HTMLElement, type Node, type TextNode } from "node-html-parser";
 import { ROW_START, CELL_SEP } from "./tableMarkers.js";
 
 const BULLET_TAG = "ul";
@@ -16,7 +16,9 @@ function ownText(el: HTMLElement): string {
   let text = "";
   for (const child of el.childNodes) {
     if (child.nodeType === NodeType.TEXT_NODE) {
-      text += child.rawText;
+      // .text, not .rawText — rawText keeps HTML entities encoded, so a
+      // document's "&" would otherwise come through as a literal "&amp;".
+      text += (child as TextNode).text;
       continue;
     }
     if (child.nodeType !== NodeType.ELEMENT_NODE) continue;

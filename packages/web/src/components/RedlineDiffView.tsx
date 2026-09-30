@@ -1,15 +1,15 @@
 import type { FileDiff, RedlineChange } from "../api/client.js";
 import { ROW_START, CELL_SEP } from "@gitlaw/core/src/diff/tableMarkers.js";
 
-type Segment = { kind: "text"; changes: RedlineChange[] } | { kind: "table"; rows: RedlineChange[][][] };
+export type Segment<C extends RedlineChange = RedlineChange> = { kind: "text"; changes: C[] } | { kind: "table"; rows: C[][][] };
 
 /** Regroups the flat change list into runs of plain text and tables: the
  * redline marks each table row with a ROW_START change, CELL_SEP changes
  * between cells, and a closing "\n\n" change (see tableMarkers.ts), and
  * consecutive rows belong to the same table. */
-function toSegments(changes: RedlineChange[]): Segment[] {
-  const segments: Segment[] = [];
-  let row: RedlineChange[][] | null = null;
+export function toSegments<C extends RedlineChange>(changes: C[]): Segment<C>[] {
+  const segments: Segment<C>[] = [];
+  let row: C[][] | null = null;
   for (const c of changes) {
     if (c.value === ROW_START) {
       const last = segments[segments.length - 1];

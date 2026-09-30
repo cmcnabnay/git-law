@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, type PrDetail, type Repo } from "../api/client.js";
+import { api, type BranchInfo, type PrDetail, type Repo } from "../api/client.js";
 import { RedlineDiffView } from "../components/RedlineDiffView.js";
 import { useSetRepoHeaderName } from "../context/repoHeader.js";
 
@@ -13,6 +13,14 @@ const EVENT_LABEL: Record<string, string> = {
   closed: "closed this pull request (branch deleted)",
   comment: "commented",
 };
+
+/** "<branch>-2", or the next free "-N" if that's taken. */
+function nextRevisionName(branch: string, existing: BranchInfo[]): string {
+  const taken = new Set(existing.map((b) => b.name));
+  let n = 2;
+  while (taken.has(`${branch}-${n}`)) n++;
+  return `${branch}-${n}`;
+}
 
 export function PrDetailPage() {
   const { repoId, prId } = useParams<{ repoId: string; prId: string }>();
@@ -28,6 +36,8 @@ export function PrDetailPage() {
   const [showRejectBox, setShowRejectBox] = useState(false);
   const [comment, setComment] = useState("");
   const [compareTo, setCompareTo] = useState<string | null>(null);
+  const [revisionBranch, setRevisionBranch] = useState("");
+  const [createdBranch, setCreatedBranch] = useState<string | null>(null);
 
   function load(compareOverride?: string) {
     if (!repoId || !prId) return;
@@ -36,6 +46,7 @@ export function PrDetailPage() {
         setRepo(r);
         setDetail(d);
         setCompareTo(d.compareBranch);
+        setRevisionBranch((current) => current || nextRevisionName(d.pr.branch, r.branches ?? []));
         if (!actorEmail && r.participants?.length) setActorEmail(r.participants[0].email);
       })
       .catch((e) => setError(e.message));
@@ -71,6 +82,23 @@ export function PrDetailPage() {
       setRejectComment("");
       setShowRejectBox(false);
       load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreateRevisionBranch(e: React.FormEvent) {
+    e.preventDefault();
+    if (!repoId || !prId || !revisionBranch.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { branch } = await api.createRevisionBranch(repoId, prId, revisionBranch.trim());
+      setCreatedBranch(branch);
+      setRevisionBranch("");
+      load(compareTo ?? undefined);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -222,6 +250,32 @@ export function PrDetailPage() {
             </div>
           )}
         </div>
+      )}
+
+      {pr.status === "rejected" && (
+        <form className="card" onSubmit={handleCreateRevisionBranch}>
+          <h3 style={{ marginTop: 0 }}>Revise on a new branch</h3>
+          <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 0 }}>
+            Branches off <span className="mono">{pr.branch}</span>. In the Local tab, Sync and switch to the new branch,
+            then open a document and choose "PR changes" to edit it against this pull request's redline.
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              value={revisionBranch}
+              onChange={(e) => setRevisionBranch(e.target.value)}
+              placeholder="New branch name"
+              style={{ flex: 1 }}
+            />
+            <button className="primary" disabled={busy || !revisionBranch.trim()}>
+              Create branch
+            </button>
+          </div>
+          {createdBranch && (
+            <p style={{ color: "var(--success)", fontSize: 13, marginBottom: 0 }}>
+              Created <span className="mono">{createdBranch}</span> from {pr.branch}.
+            </p>
+          )}
+        </form>
       )}
 
       <div className="card">
