@@ -343,3 +343,92 @@ test("computeRedline defaults to clause granularity", () => {
   const newText = "Alpha beta, gamma delta. Epsilon eta.";
   assert.deepEqual(computeRedline(oldText, newText), computeRedline(oldText, newText, "clause"));
 });
+
+// Renders a redline as text, [-struck-] and {+inserted+}, with one "\n"
+// between paragraphs, for readable assertions.
+function render(oldText: string, newText: string): string {
+  return computeRedline(oldText, newText, "sentence")
+    .changes.map((c) => {
+      const value = c.value.replace(/\n\n$/, "");
+      const brk = c.value.endsWith("\n\n") ? "\n" : "";
+      return (c.added ? `{+${value}+}` : c.removed ? `[-${value}-]` : value) + brk;
+    })
+    .join("")
+    .trimEnd();
+}
+
+test("sentence mode groups a replaced phrase into one struck run and one inserted run", () => {
+  assert.equal(
+    render(
+      "(c)  Seller may, in its sole discretion, without liability or penalty, tender delivery of Goods to Buyer.",
+      "(c)  Seller may, with Buyer’s prior written consent, tender delivery of Goods to Buyer."
+    ),
+    "(c)  Seller may, [-in its sole discretion, without liability or penalty-]{+with Buyer’s prior written consent+}, tender delivery of Goods to Buyer."
+  );
+  assert.equal(
+    render(
+      "(d)  If for any reason Buyer fails to accept delivery of any of the Goods by the Delivery Date, Buyer shall bear the risk of loss.",
+      "(d)  If Buyer’s material, uncured breach prevents delivery by the Delivery Date, Buyer shall bear the risk of loss."
+    ),
+    "(d)  If [-for any reason Buyer fails to accept delivery of any of the Goods -]{+Buyer’s material, uncured breach prevents delivery +}by the Delivery Date, Buyer shall bear the risk of loss."
+  );
+});
+
+test("sentence mode keeps a changed figure and its parenthetical together", () => {
+  assert.equal(
+    render("Notice within five (5) days of the time when Buyer discovers the defect.", "Notice within twenty (20) days of the time when Buyer discovers the defect."),
+    "Notice within [-five (5)-]{+twenty (20)+} days of the time when Buyer discovers the defect."
+  );
+});
+
+test("sentence mode still shows a light edit as a precise inline change", () => {
+  assert.equal(
+    render(
+      "Seller warrants to Buyer that for a period of 6 months from the date Seller tenders delivery of the Goods (”Warranty Period”), such Goods will conform.",
+      "Seller warrants to Buyer that for a period of 6 months from the date Buyer accepts the Goods (”Warranty Period”), such Goods will conform."
+    ),
+    "Seller warrants to Buyer that for a period of 6 months from the date [-Seller tenders delivery of -]{+Buyer accepts +}the Goods (”Warranty Period”), such Goods will conform."
+  );
+});
+
+test("sentence mode strikes a rewritten sentence whole instead of word-by-word", () => {
+  assert.equal(
+    render(
+      "5.  Title and Risk of Loss. Title and risk of loss pass to Buyer upon tender of delivery of the Goods at the Delivery Location.",
+      "5.  Title and Risk of Loss. Title to and risk of loss of the Goods shall pass to Buyer only upon Buyer's acceptance of such Goods pursuant to Section 6."
+    ),
+    "5.  Title and Risk of Loss. [-Title and risk of loss pass to Buyer upon tender of delivery of the Goods at the Delivery Location.-]{+Title to and risk of loss of the Goods shall pass to Buyer only upon Buyer's acceptance of such Goods pursuant to Section 6.+}"
+  );
+});
+
+test("sentence mode pairs paragraphs by content, not position, after a deletion", () => {
+  const oldText =
+    "(b)  IN NO EVENT SHALL SELLER’S AGGREGATE LIABILITY EXCEED THE AMOUNTS PAID TO SELLER.\n\n" +
+    "12.  Compliance with Law. Buyer is in compliance with and shall comply with all applicable laws, regulations, and ordinances.\n\n" +
+    "13.  Termination. Seller may terminate this Agreement upon written notice to Buyer, if Buyer fails to pay any amount when due.";
+  const newText =
+    "12.  Compliance with Law. Each party shall comply with all applicable laws, regulations, and ordinances.\n\n" +
+    "13.  Termination. Either Party may terminate this Agreement upon written notice to the other Party, if the other Party fails to pay any amount when due.";
+
+  const { paragraphStatus } = computeRedline(oldText, newText, "sentence");
+  assert.deepEqual(paragraphStatus.old, ["removed", "changed", "changed"]);
+  assert.deepEqual(paragraphStatus.new, ["changed", "changed"]);
+  const out = render(oldText, newText);
+  assert.equal(
+    out,
+    "[-(b)  IN NO EVENT SHALL SELLER’S AGGREGATE LIABILITY EXCEED THE AMOUNTS PAID TO SELLER.-]\n" +
+      "12.  Compliance with Law. [-Buyer is in compliance with and -]{+Each party +}shall comply with all applicable laws, regulations, and ordinances.\n" +
+      "13.  Termination. [-Seller -]{+Either Party +}may terminate this Agreement upon written notice to [-Buyer-]{+the other Party+}, if [-Buyer -]{+the other Party +}fails to pay any amount when due."
+  );
+});
+
+test("sentence mode shows replaced sentences as one struck block then one inserted block", () => {
+  const out = render(
+    "Seller estimates delivery. Seller shall not be liable for any delay in delivery or loss in transit.",
+    "Seller estimates delivery. Seller shall deliver the goods at the delivery location on time. Seller shall be responsible for the transportation of the goods."
+  );
+  assert.equal(
+    out,
+    "Seller estimates delivery. [-Seller shall not be liable for any delay in delivery or loss in transit.-]{+Seller shall deliver the goods at the delivery location on time. Seller shall be responsible for the transportation of the goods.+}"
+  );
+});

@@ -82,6 +82,277 @@ function wordDiffOrReplace(oldClause: string, newClause: string): Change[] {
   return wordDiff;
 }
 
+// ---------------------------------------------------------------------------
+// Sentence mode: grouped edits instead of word-by-word alternation.
+//
+// The word tokenizer keeps each space as its own token, so a plain word diff
+// of "in its sole discretion" -> "with Buyer's prior written consent"
+// matches every space and renders as in|with its|Buyer's sole|prior... —
+// alternating struck and inserted words that read as nothing. A lawyer's
+// redline instead shows the replaced words struck together, then the new
+// words inserted together, anchored on the text that really stayed put.
+
+// Below this fraction of words kept after grouping, a sentence reads as
+// rewritten rather than edited, and is shown as struck-then-inserted whole.
+const SENTENCE_REWRITE_THRESHOLD = 0.5;
+
+// A rewritten sentence still keeps an unchanged opening or ending of at
+// least this many words (e.g. "Buyer shall perform its obligations under
+// this Agreement") outside the struck/inserted block; anything shorter is
+// folded in so the block reads as one whole sentence.
+const KEEP_EDGE_WORDS = 3;
+
+type Piece = { kind: "same"; value: string } | { kind: "edit"; removed: string; added: string };
+
+function toPieces(changes: Change[]): Piece[] {
+  const pieces: Piece[] = [];
+  for (const c of changes) {
+    if (!c.added && !c.removed) {
+      pieces.push({ kind: "same", value: c.value });
+      continue;
+    }
+    let run = pieces[pieces.length - 1];
+    if (run?.kind !== "edit") {
+      run = { kind: "edit", removed: "", added: "" };
+      pieces.push(run);
+    }
+    if (c.removed) run.removed += c.value;
+    else run.added += c.value;
+  }
+  return pieces;
+}
+
+function editWords(run: { removed: string; added: string }): number {
+  return countWords(run.removed) + countWords(run.added);
+}
+
+/** Whether unchanged text sitting between two edits is too slight to anchor
+ * on — whitespace or punctuation, or one lone word between two edits that
+ * each change real words (the "Buyer" in "for any reason Buyer fails to
+ * accept" -> "Buyer's material, uncured breach prevents") — and so belongs
+ * inside one combined edit rather than splitting it in two. */
+function isWeakAnchor(value: string, before: { removed: string; added: string }, after: { removed: string; added: string }) {
+  const words = countWords(value);
+  return words === 0 || (words === 1 && editWords(before) > 0 && editWords(after) > 0);
+}
+
+function count(s: string, ch: string): number {
+  return s.split(ch).length - 1;
+}
+
+/** Merges edits separated only by weak anchors into one struck run and one
+ * inserted run. */
+function groupEdits(pieces: Piece[]): Piece[] {
+  const out: Piece[] = [];
+  for (let k = 0; k < pieces.length; k++) {
+    const piece = pieces[k];
+    const prev = out[out.length - 1];
+    if (piece.kind === "edit") {
+      if (prev?.kind === "edit") {
+        prev.removed += piece.removed;
+        prev.added += piece.added;
+      } else {
+        out.push({ ...piece });
+      }
+      continue;
+    }
+    const next = pieces[k + 1];
+    if (prev?.kind === "edit" && next?.kind === "edit" && isWeakAnchor(piece.value, prev, next)) {
+      prev.removed += piece.value;
+      prev.added += piece.value;
+      continue;
+    }
+    // An edit that opened a parenthesis on both sides — "five (5" ->
+    // "twenty (20" — takes the matching ")" too, so it reads "five (5)"
+    // -> "twenty (20)" rather than leaving the closer stranded outside.
+    let value = piece.value;
+    if (prev?.kind === "edit") {
+      for (const [open, close] of [["(", ")"], ["[", "]"]]) {
+        while (
+          value.startsWith(close) &&
+          count(prev.removed, open) > count(prev.removed, close) &&
+          count(prev.added, open) > count(prev.added, close)
+        ) {
+          prev.removed += close;
+          prev.added += close;
+          value = value.slice(1);
+        }
+      }
+    }
+    if (value) out.push({ kind: "same", value });
+  }
+  return out;
+}
+
+function piecesToChanges(pieces: Piece[]): Change[] {
+  const changes: Change[] = [];
+  for (const piece of pieces) {
+    if (piece.kind === "same") {
+      changes.push({ value: piece.value } as Change);
+      continue;
+    }
+    if (piece.removed) changes.push({ removed: true, value: piece.removed } as Change);
+    if (piece.added) changes.push({ added: true, value: piece.added } as Change);
+  }
+  return changes;
+}
+
+/** A rewritten sentence: struck whole, then inserted whole, keeping only a
+ * substantial unchanged opening/ending (see KEEP_EDGE_WORDS) outside. */
+function wholeSentenceReplace(pieces: Piece[]): Change[] {
+  const first = pieces[0];
+  const last = pieces[pieces.length - 1];
+  const keepFirst = first?.kind === "same" && countWords(first.value) >= KEEP_EDGE_WORDS;
+  const keepLast = pieces.length > 1 && last?.kind === "same" && countWords(last.value) >= KEEP_EDGE_WORDS;
+  const middle = pieces.slice(keepFirst ? 1 : 0, keepLast ? -1 : undefined);
+  const removed = middle.map((p) => (p.kind === "same" ? p.value : p.removed)).join("");
+  const added = middle.map((p) => (p.kind === "same" ? p.value : p.added)).join("");
+  return piecesToChanges([
+    ...(keepFirst ? [first] : []),
+    { kind: "edit", removed, added },
+    ...(keepLast ? [last] : []),
+  ]);
+}
+
+/** Sentence-mode counterpart of wordDiffOrReplace: word-diffs a matched
+ * sentence pair, groups the result into whole struck/inserted runs, and
+ * falls back to replacing the sentence whole when too little survives —
+ * returning null when nothing at all is kept, so the caller can fold the
+ * pair into the surrounding struck/inserted blocks (see diffSentenceRun). */
+function groupedSentenceDiff(oldSentence: string, newSentence: string): Change[] | null {
+  const pieces = groupEdits(toPieces(diffWordsKeepingNumbers(oldSentence, newSentence)));
+  const keptWords = pieces.reduce((sum, p) => sum + (p.kind === "same" ? countWords(p.value) : 0), 0);
+  const similarity = keptWords / Math.max(countWords(oldSentence), countWords(newSentence), 1);
+  if (similarity >= SENTENCE_REWRITE_THRESHOLD) return piecesToChanges(pieces);
+  const replaced = wholeSentenceReplace(pieces);
+  return replaced.some((c) => !c.added && !c.removed) ? replaced : null;
+}
+
+/** Diffs a run of changed sentences: pairs them by content, word-diffs each
+ * pair, and shows everything else — unpaired sentences and pairs rewritten
+ * outright — as one struck block followed by one inserted block between
+ * the pairs that did keep something in common. */
+function diffSentenceRun(olds: string[], news: string[]): Change[] {
+  const changes: Change[] = [];
+  let removed = "";
+  let added = "";
+  const flush = () => {
+    if (removed) changes.push({ removed: true, value: removed } as Change);
+    if (added) changes.push({ added: true, value: added } as Change);
+    removed = added = "";
+  };
+  for (const pair of alignByContent(olds, news)) {
+    const diff = pair.old !== undefined && pair.new !== undefined ? groupedSentenceDiff(pair.old, pair.new) : null;
+    if (diff) {
+      flush();
+      changes.push(...diff);
+    } else {
+      removed += pair.old ?? "";
+      added += pair.new ?? "";
+    }
+  }
+  flush();
+  return changes;
+}
+
+// Short words that every sentence shares, ignored when judging whether two
+// sentences or paragraphs are about the same thing (see contentSimilarity).
+const FILLER_WORDS = new Set([
+  "the", "and", "any", "for", "not", "all", "its", "this", "that", "with", "such", "shall", "may", "from", "under",
+  "upon", "other", "which", "will", "are", "was", "has", "have", "been", "their", "these", "those", "into", "within",
+]);
+
+function contentWords(text: string): string[] {
+  return (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length > 2 && !FILLER_WORDS.has(w));
+}
+
+/** Dice similarity of two texts' content words, 0..1. Two pieces with no
+ * content words at all — a paragraph number "12. ", a "(a) " label — count
+ * as the same kind of thing so they still pair up with each other. */
+function contentSimilarity(a: string, b: string): number {
+  const wa = contentWords(a);
+  const wb = contentWords(b);
+  if (wa.length === 0 || wb.length === 0) return wa.length === wb.length ? 1 : 0;
+  const counts = new Map<string, number>();
+  for (const w of wa) counts.set(w, (counts.get(w) ?? 0) + 1);
+  let common = 0;
+  for (const w of wb) {
+    const n = counts.get(w) ?? 0;
+    if (n > 0) {
+      common++;
+      counts.set(w, n - 1);
+    }
+  }
+  return (2 * common) / (wa.length + wb.length);
+}
+
+// Minimum contentSimilarity for a removed and an added sentence/paragraph to
+// be diffed against each other rather than shown as a whole removal plus a
+// whole insertion.
+const PAIRING_THRESHOLD = 0.3;
+
+type Aligned = { old: string; new: string } | { old: string; new?: undefined } | { old?: undefined; new: string };
+
+/**
+ * Pairs a run of removed items with a run of added ones by content rather
+ * than by position: the in-order pairing with the greatest total similarity
+ * (an LCS weighted by contentSimilarity), where only pairs at or above
+ * PAIRING_THRESHOLD may match. Pairing by position instead is what diffed
+ * an old "Compliance with Law" paragraph against a new "Termination" one
+ * just because an earlier paragraph had been deleted. Between matched
+ * pairs, every unmatched removed item comes before every unmatched added
+ * one, so a replaced passage reads as one struck block then one inserted
+ * block instead of alternating red and green.
+ */
+function alignByContent(olds: string[], news: string[]): Aligned[] {
+  const sim = olds.map((o) => news.map((n) => contentSimilarity(o, n)));
+  const best = Array.from({ length: olds.length + 1 }, () => new Array<number>(news.length + 1).fill(0));
+  for (let a = olds.length - 1; a >= 0; a--) {
+    for (let b = news.length - 1; b >= 0; b--) {
+      const pair = sim[a][b] >= PAIRING_THRESHOLD ? sim[a][b] + best[a + 1][b + 1] : -1;
+      best[a][b] = Math.max(best[a + 1][b], best[a][b + 1], pair);
+    }
+  }
+
+  const out: Aligned[] = [];
+  const pendingOld: string[] = [];
+  const pendingNew: string[] = [];
+  const flush = () => {
+    out.push(...pendingOld.splice(0).map((old) => ({ old })), ...pendingNew.splice(0).map((n) => ({ new: n })));
+  };
+  let a = 0;
+  let b = 0;
+  while (a < olds.length && b < news.length) {
+    if (sim[a][b] >= PAIRING_THRESHOLD && best[a][b] === sim[a][b] + best[a + 1][b + 1]) {
+      flush();
+      out.push({ old: olds[a++], new: news[b++] });
+    } else if (best[a][b] === best[a + 1][b]) {
+      pendingOld.push(olds[a++]);
+    } else {
+      pendingNew.push(news[b++]);
+    }
+  }
+  pendingOld.push(...olds.slice(a));
+  pendingNew.push(...news.slice(b));
+  flush();
+  return out;
+}
+
+type ArrayChunk = { added?: boolean; removed?: boolean; value: string[] };
+
+/** Collects the maximal run of consecutive added/removed chunks starting at
+ * index i — diffArrays can emit one changed passage as added, removed,
+ * added — so the whole run is aligned at once (see alignByContent). */
+function collectChangedRun(chunks: ArrayChunk[], i: number): { olds: string[]; news: string[]; next: number } {
+  const olds: string[] = [];
+  const news: string[] = [];
+  while (i < chunks.length && (chunks[i].added || chunks[i].removed)) {
+    (chunks[i].removed ? olds : news).push(...chunks[i].value);
+    i++;
+  }
+  return { olds, news, next: i };
+}
+
 // Splits on , . : ; keeping each delimiter attached to the clause it ends,
 // along with a trailing quote (a closing quote right after the punctuation
 // belongs with the clause that precedes it, e.g. `confidential,"` — that's
@@ -276,6 +547,12 @@ function diffParagraph(oldParagraph: string, newParagraph: string, granularity: 
   let i = 0;
   while (i < clauseChanges.length) {
     const chunk = clauseChanges[i];
+    if (granularity === "sentence" && (chunk.added || chunk.removed)) {
+      const run = collectChangedRun(clauseChanges, i);
+      i = run.next;
+      changes.push(...diffSentenceRun(run.olds, run.news));
+      continue;
+    }
     if (!chunk.removed) {
       changes.push({ added: chunk.added, value: (chunk.value as string[]).join("") } as Change);
       i++;
@@ -437,6 +714,24 @@ export function computeRedline(
   let i = 0;
   while (i < paragraphChanges.length) {
     const chunk = paragraphChanges[i];
+    if (granularity === "sentence" && (chunk.added || chunk.removed)) {
+      const run = collectChangedRun(paragraphChanges, i);
+      i = run.next;
+      for (const pair of alignByContent(run.olds, run.news)) {
+        if (pair.old !== undefined && pair.new !== undefined) {
+          changedParagraph(pair.old, pair.new, granularity).forEach(record);
+          oldStatus.push("changed");
+          newStatus.push("changed");
+        } else if (pair.old !== undefined) {
+          wholeParagraph(pair.old, { removed: true }).forEach(record);
+          oldStatus.push("removed");
+        } else {
+          wholeParagraph(pair.new, { added: true }).forEach(record);
+          newStatus.push("added");
+        }
+      }
+      continue;
+    }
     if (!chunk.removed) {
       // Either genuinely unchanged, or (chunk.added true) a pure insertion
       // with nothing removed at this position — diffArrays reports both the
