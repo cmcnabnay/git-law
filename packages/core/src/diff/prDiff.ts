@@ -27,7 +27,7 @@ export async function computeFileDiff(
   baseSha: string,
   headSha: string,
   filePath: string,
-  granularity: RedlineGranularity = "clause"
+  granularity: RedlineGranularity = "sentence"
 ): Promise<FileDiff> {
   const [oldVersion, newVersion] = await Promise.all([
     safeReadDocument(barePath, baseSha, filePath),
@@ -51,7 +51,7 @@ export async function computePrDiff(
   barePath: string,
   baseSha: string,
   headSha: string,
-  granularity: RedlineGranularity = "clause"
+  granularity: RedlineGranularity = "sentence"
 ): Promise<FileDiff[]> {
   const paths = changedFiles(barePath, baseSha, headSha).filter(isSupportedDocument);
   return Promise.all(paths.map((p) => computeFileDiff(barePath, baseSha, headSha, p, granularity)));

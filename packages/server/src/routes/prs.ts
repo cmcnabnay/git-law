@@ -59,13 +59,9 @@ prsRouter.get<PrParams>(
     const baseSha = useLiveHead ? branchHeadSha(repo.bare_path, compareTo) : pr.base_sha;
     const compareBranch = useLiveHead ? compareTo : (pr.base_branch ?? pr.target_branch);
 
-    // ?granularity=sentence diffs changed paragraphs sentence-by-sentence
-    // (with ; and : list items as their own units) instead of clause-by-clause.
-    const granularity = req.query.granularity === "sentence" ? "sentence" : "clause";
-
     const diffs: FileDiff[] =
       isRealCommit(pr.head_sha) && isRealCommit(baseSha)
-        ? await computePrDiff(repo.bare_path, baseSha, pr.head_sha, granularity)
+        ? await computePrDiff(repo.bare_path, baseSha, pr.head_sha)
         : [];
 
     res.json({

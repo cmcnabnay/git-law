@@ -9,6 +9,8 @@ export type ParagraphStatus = "unchanged" | "changed" | "removed" | "added";
 // legal drafting uses to run a list inside one sentence — "the following
 // events: (i) acts of God; (ii) flood, fire...;" — so each list item is
 // compared as a unit without commas breaking it into fragments.
+// "sentence" is the default and the only mode the app exposes; "clause" is
+// deprecated and kept only for existing callers/tests.
 export type RedlineGranularity = "clause" | "sentence";
 
 export interface RedlineDiff {
@@ -692,7 +694,7 @@ function changedParagraph(oldPara: string, newPara: string, granularity: Redline
 export function computeRedline(
   oldText: string,
   newText: string,
-  granularity: RedlineGranularity = "clause"
+  granularity: RedlineGranularity = "sentence"
 ): RedlineDiff {
   const oldParagraphs = splitParagraphs(oldText);
   const newParagraphs = splitParagraphs(newText);

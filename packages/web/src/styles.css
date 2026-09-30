@@ -221,8 +221,6 @@ input, textarea {
 
 .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
 .tabs button.active { background: var(--accent); color: white; border-color: var(--accent); }
-.tabs .granularity-select { margin-left: auto; font-size: 13px; color: var(--muted); }
-.tabs .granularity-select select { width: auto; }
 
 .repo-tabs { border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
 

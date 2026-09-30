@@ -4,7 +4,7 @@ import { computeRedline, splitSentences } from "./redline.js";
 import { ROW_START, CELL_SEP } from "./tableMarkers.js";
 
 test("computeRedline marks a substituted word as removed+added", () => {
-  const { changes, stats } = computeRedline("The term is one year.", "The term is TWO years.");
+  const { changes, stats } = computeRedline("The term is one year.", "The term is TWO years.", "clause");
   const removed = changes.filter((c) => c.removed).map((c) => c.value);
   const added = changes.filter((c) => c.added).map((c) => c.value);
   assert.deepEqual(removed, ["one", "year"]);
@@ -57,7 +57,7 @@ test("computeRedline diffs at clause granularity, leaving unrelated clauses in t
   const oldText = "First clause, second clause, this is the old ending clause.";
   const newText = "First clause, second clause, this is a totally different unrelated new ending.";
 
-  const { changes } = computeRedline(oldText, newText);
+  const { changes } = computeRedline(oldText, newText, "clause");
   const unchangedText = changes
     .filter((c) => !c.added && !c.removed)
     .map((c) => c.value)
@@ -102,7 +102,7 @@ test("computeRedline treats two clauses as unchanged when only their boundary pu
     "Shared clause, or destroy copies of Confidential Information in the ordinary course, " +
     "provided that such retained copies remain subject to this agreement and are not used for any purpose.";
 
-  const { changes } = computeRedline(oldText, newText);
+  const { changes } = computeRedline(oldText, newText, "clause");
   const unchangedText = changes
     .filter((c) => !c.added && !c.removed)
     .map((c) => c.value)
@@ -200,7 +200,7 @@ test("computeRedline doesn't split a clause on a comma inside a bracketed placeh
   const oldText = "and [•], a [•] [•] located at [•].";
   const newText = "and [Data Center, LLC], a [Texas Limited Liability Company] [] located at [2722 Travis, Houston TX 77002].";
 
-  const { changes } = computeRedline(oldText, newText);
+  const { changes } = computeRedline(oldText, newText, "clause");
   const removed = changes.filter((c) => c.removed).map((c) => c.value);
   const added = changes.filter((c) => c.added).map((c) => c.value);
 
@@ -229,7 +229,7 @@ test("computeRedline doesn't join multiple unmatched clauses into one blob befor
     "including as to the posting of bond or other security. " +
     "Recipient waives any claim or defense.";
 
-  const { changes } = computeRedline(oldText, newText);
+  const { changes } = computeRedline(oldText, newText, "clause");
 
   const removed = changes.filter((c) => c.removed).map((c) => c.value.trim());
   const added = changes.filter((c) => c.added).map((c) => c.value.trim());
@@ -251,7 +251,8 @@ test("computeRedline doesn't join multiple unmatched clauses into one blob befor
 test("computeRedline keeps a lightly edited paragraph as a precise word-level diff", () => {
   const { changes } = computeRedline(
     "The Recipient shall keep the Confidential Information secret for one year.",
-    "The Recipient shall keep the Confidential Information secret for TWO years."
+    "The Recipient shall keep the Confidential Information secret for TWO years.",
+    "clause"
   );
   const removed = changes.filter((c) => c.removed).map((c) => c.value);
   const added = changes.filter((c) => c.added).map((c) => c.value);
@@ -338,10 +339,10 @@ test("computeRedline sentence granularity word-diffs a whole list item rather th
   assert.equal(sentence.changes.map((c) => (c.removed ? "" : c.value)).join(""), newText + "\n\n");
 });
 
-test("computeRedline defaults to clause granularity", () => {
+test("computeRedline defaults to sentence granularity", () => {
   const oldText = "Alpha beta, gamma delta. Epsilon zeta.";
   const newText = "Alpha beta, gamma delta. Epsilon eta.";
-  assert.deepEqual(computeRedline(oldText, newText), computeRedline(oldText, newText, "clause"));
+  assert.deepEqual(computeRedline(oldText, newText), computeRedline(oldText, newText, "sentence"));
 });
 
 // Renders a redline as text, [-struck-] and {+inserted+}, with one "\n"

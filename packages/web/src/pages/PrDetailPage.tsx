@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, type DiffGranularity, type PrDetail, type Repo } from "../api/client.js";
+import { api, type PrDetail, type Repo } from "../api/client.js";
 import { RedlineDiffView } from "../components/RedlineDiffView.js";
 import { useSetRepoHeaderName } from "../context/repoHeader.js";
 
@@ -28,11 +28,10 @@ export function PrDetailPage() {
   const [showRejectBox, setShowRejectBox] = useState(false);
   const [comment, setComment] = useState("");
   const [compareTo, setCompareTo] = useState<string | null>(null);
-  const [granularity, setGranularity] = useState<DiffGranularity>("clause");
 
-  function load(compareOverride?: string, granularityOverride?: DiffGranularity) {
+  function load(compareOverride?: string) {
     if (!repoId || !prId) return;
-    Promise.all([api.getRepo(repoId), api.getPr(repoId, prId, compareOverride, granularityOverride ?? granularity)])
+    Promise.all([api.getRepo(repoId), api.getPr(repoId, prId, compareOverride)])
       .then(([r, d]) => {
         setRepo(r);
         setDetail(d);
@@ -47,11 +46,6 @@ export function PrDetailPage() {
   function handleCompareChange(branch: string) {
     setCompareTo(branch);
     load(branch);
-  }
-
-  function handleGranularityChange(next: DiffGranularity) {
-    setGranularity(next);
-    load(compareTo ?? undefined, next);
   }
 
   async function handleApprove() {
@@ -174,18 +168,6 @@ export function PrDetailPage() {
             <button className={view === "formatted" ? "active" : ""} onClick={() => setView("formatted")}>
               Formatted
             </button>
-            {view === "redline" && (
-              <label className="granularity-select">
-                Compare by{" "}
-                <select
-                  value={granularity}
-                  onChange={(e) => handleGranularityChange(e.target.value as DiffGranularity)}
-                >
-                  <option value="clause">Clause</option>
-                  <option value="sentence">Sentence</option>
-                </select>
-              </label>
-            )}
           </div>
 
           {view === "redline" ? (
