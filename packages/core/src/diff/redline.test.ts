@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeRedline } from "./redline.js";
+import { computeRedline, splitSentences } from "./redline.js";
 import { ROW_START, CELL_SEP } from "./tableMarkers.js";
 
 test("computeRedline marks a substituted word as removed+added", () => {
@@ -282,4 +282,64 @@ test("computeRedline diffs table rows cell-by-cell and keeps the row/cell marker
   const end = changes.findIndex((c, i) => i > start && c.value === "\n\n");
   const newRow = changes.slice(start, end).filter((c) => !c.removed).map((c) => c.value).join("");
   assert.equal(newRow, row("Type A", "10,000", "$900"));
+});
+
+test("splitSentences splits on . ? ! and on the ; : that run a list inside a contract sentence", () => {
+  const text =
+    "including, without limitation, the following force majeure events (\u201DForce Majeure Event(s)\u201D): " +
+    "(i) acts of God; (ii) flood, fire, earthquake, pandemic, epidemic, or explosion; " +
+    "(iii) war, invasion, hostilities (whether war is declared or not), terrorist threats or acts, riot or other civil unrest; " +
+    "(iv) government order, law, or actions. Is that clear? Yes!";
+  const sentences = splitSentences(text);
+  assert.deepEqual(sentences, [
+    "including, without limitation, the following force majeure events (\u201DForce Majeure Event(s)\u201D): ",
+    "(i) acts of God; ",
+    "(ii) flood, fire, earthquake, pandemic, epidemic, or explosion; ",
+    "(iii) war, invasion, hostilities (whether war is declared or not), terrorist threats or acts, riot or other civil unrest; ",
+    "(iv) government order, law, or actions. ",
+    "Is that clear? ",
+    "Yes!",
+  ]);
+  assert.equal(sentences.join(""), text);
+});
+
+test("splitSentences doesn't end a sentence at a period that isn't a sentence end", () => {
+  const cases = [
+    "Pay $1,100.50 under Section 3.1 by 10:30 a.m. on the due date.",
+    "See e.g. the U.S. rules and No. 5 thereof.",
+    "Signed by J. Smith for Acme Inc., a Delaware corporation.",
+    "Fees, costs, etc. are payable [at Suite 4. Floor 2] monthly.",
+  ];
+  for (const text of cases) assert.deepEqual(splitSentences(text), [text], text);
+});
+
+test("splitSentences still ends a sentence after a lettered exhibit, a company suffix, or a closing quote", () => {
+  assert.deepEqual(splitSentences("As set out in Exhibit A. The Buyer shall pay."), [
+    "As set out in Exhibit A. ",
+    "The Buyer shall pay.",
+  ]);
+  assert.deepEqual(splitSentences("Sold to Acme Inc. The Buyer shall pay."), [
+    "Sold to Acme Inc. ",
+    "The Buyer shall pay.",
+  ]);
+  assert.deepEqual(splitSentences('It is "final." Nothing else applies.'), ['It is "final." ', "Nothing else applies."]);
+});
+
+test("computeRedline sentence granularity word-diffs a whole list item rather than comma-split fragments", () => {
+  const oldText = "Force majeure includes: (i) acts of God; (ii) flood, fire, or explosion; (iii) war.";
+  const newText = "Force majeure includes: (i) acts of God; (ii) flood, fire, earthquake, or explosion; (iii) war.";
+
+  const sentence = computeRedline(oldText, newText, "sentence");
+  assert.deepEqual(
+    sentence.changes.filter((c) => c.added).map((c) => c.value),
+    ["earthquake, "]
+  );
+  assert.equal(sentence.changes.filter((c) => c.removed).length, 0);
+  assert.equal(sentence.changes.map((c) => (c.removed ? "" : c.value)).join(""), newText + "\n\n");
+});
+
+test("computeRedline defaults to clause granularity", () => {
+  const oldText = "Alpha beta, gamma delta. Epsilon zeta.";
+  const newText = "Alpha beta, gamma delta. Epsilon eta.";
+  assert.deepEqual(computeRedline(oldText, newText), computeRedline(oldText, newText, "clause"));
 });

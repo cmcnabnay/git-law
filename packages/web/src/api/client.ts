@@ -60,6 +60,8 @@ export interface RedlineChange {
   removed?: boolean;
 }
 
+export type DiffGranularity = "clause" | "sentence";
+
 export interface FileDiff {
   path: string;
   redline: { changes: RedlineChange[]; stats: { added: number; removed: number } };
@@ -108,8 +110,13 @@ export const api = {
       `/repos/${repoId}/preview?rev=${encodeURIComponent(rev)}&path=${encodeURIComponent(path)}`
     ),
   listPrs: (repoId: string) => request<PullRequest[]>(`/repos/${repoId}/prs`),
-  getPr: (repoId: string, prId: string, compareTo?: string) =>
-    request<PrDetail>(`/repos/${repoId}/prs/${prId}${compareTo ? `?compareTo=${encodeURIComponent(compareTo)}` : ""}`),
+  getPr: (repoId: string, prId: string, compareTo?: string, granularity: DiffGranularity = "clause") => {
+    const params = new URLSearchParams();
+    if (compareTo) params.set("compareTo", compareTo);
+    if (granularity !== "clause") params.set("granularity", granularity);
+    const query = params.toString();
+    return request<PrDetail>(`/repos/${repoId}/prs/${prId}${query ? `?${query}` : ""}`);
+  },
   deletePr: (repoId: string, prId: string) =>
     request<{ ok: true; deleted: PullRequest }>(`/repos/${repoId}/prs/${prId}`, { method: "DELETE" }),
   approvePr: (repoId: string, prId: string, actorEmail: string) =>

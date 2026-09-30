@@ -1,7 +1,7 @@
 import { readBlob } from "../git/show.js";
 import { changedFiles } from "../git/changedFiles.js";
 import { readWordDocument, isSupportedDocument } from "./wordDocument.js";
-import { computeRedline, type RedlineDiff } from "./redline.js";
+import { computeRedline, type RedlineDiff, type RedlineGranularity } from "./redline.js";
 import { annotateParagraphHtml } from "./numberedText.js";
 
 export interface FileDiff {
@@ -26,13 +26,14 @@ export async function computeFileDiff(
   barePath: string,
   baseSha: string,
   headSha: string,
-  filePath: string
+  filePath: string,
+  granularity: RedlineGranularity = "clause"
 ): Promise<FileDiff> {
   const [oldVersion, newVersion] = await Promise.all([
     safeReadDocument(barePath, baseSha, filePath),
     safeReadDocument(barePath, headSha, filePath),
   ]);
-  const redline = computeRedline(oldVersion.text, newVersion.text);
+  const redline = computeRedline(oldVersion.text, newVersion.text, granularity);
   return {
     path: filePath,
     redline,
@@ -46,7 +47,12 @@ export async function computeFileDiff(
   };
 }
 
-export async function computePrDiff(barePath: string, baseSha: string, headSha: string): Promise<FileDiff[]> {
+export async function computePrDiff(
+  barePath: string,
+  baseSha: string,
+  headSha: string,
+  granularity: RedlineGranularity = "clause"
+): Promise<FileDiff[]> {
   const paths = changedFiles(barePath, baseSha, headSha).filter(isSupportedDocument);
-  return Promise.all(paths.map((p) => computeFileDiff(barePath, baseSha, headSha, p)));
+  return Promise.all(paths.map((p) => computeFileDiff(barePath, baseSha, headSha, p, granularity)));
 }

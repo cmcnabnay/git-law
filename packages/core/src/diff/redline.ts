@@ -3,6 +3,14 @@ import { ROW_START, CELL_SEP } from "./tableMarkers.js";
 
 export type ParagraphStatus = "unchanged" | "changed" | "removed" | "added";
 
+// How finely a changed paragraph is broken up before its pieces are paired
+// and word-diffed (see diffParagraph): "clause" splits on , . : ; while
+// "sentence" splits only on sentence ends (. ? !) plus the ; and : that
+// legal drafting uses to run a list inside one sentence — "the following
+// events: (i) acts of God; (ii) flood, fire...;" — so each list item is
+// compared as a unit without commas breaking it into fragments.
+export type RedlineGranularity = "clause" | "sentence";
+
 export interface RedlineDiff {
   changes: Change[];
   stats: { added: number; removed: number };
@@ -126,13 +134,117 @@ function splitClauses(text: string): string[] {
   return clauses.length ? clauses : [text];
 }
 
+// Words that end in a period without ending the sentence. Checked
+// lowercase, without the trailing period. Dotted forms like "e.g", "U.S" or
+// "L.L.C" don't need listing — any run of single letters joined by periods
+// is treated as an abbreviation (see isAbbreviation).
+const NON_TERMINAL_ABBREVIATIONS = new Set([
+  "mr", "mrs", "ms", "dr", "prof", "hon", "st", "no", "nos", "sec", "secs", "art", "arts", "para", "paras",
+  "cl", "sch", "ex", "exh", "fig", "p", "pp", "vol", "ch", "cf", "vs", "v", "viz", "approx", "al", "id",
+  "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+]);
+
+// Abbreviations that often do close a sentence ("...between Acme Inc. The
+// parties agree"), so they only count as a sentence end when the next word
+// starts with a capital letter.
+const MAYBE_TERMINAL_ABBREVIATIONS = new Set([
+  "inc", "ltd", "co", "corp", "llc", "llp", "lp", "plc", "jr", "sr", "etc", "esq",
+]);
+
+function wordBefore(text: string, i: number): string {
+  let start = i;
+  while (start > 0 && /[\p{L}.]/u.test(text[start - 1])) start--;
+  return text.slice(start, i);
+}
+
+function isAbbreviation(word: string): boolean {
+  return /^(?:\p{L}\.)*\p{L}$/u.test(word) || NON_TERMINAL_ABBREVIATIONS.has(word.toLowerCase());
+}
+
+// "Exhibit A." / "Schedule B." — a lone letter naming a document part, not
+// a person's initial, so it can end a sentence like any other word.
+const LETTERED_REFERENCE = /\b(?:exhibit|schedule|annex|appendix|attachment|article|section|part|clause|paragraph|rider|tab)\s+\p{L}$/iu;
+
+const SENTENCE_CLOSERS = "\"'\u201D\u2019)";
+
+/**
+ * Whether the "." at text[i] ends a sentence — not every one does: a
+ * decimal or section number ("2.5", "Section 3.1"), an abbreviation ("e.g.",
+ * "No. 5", "U.S."), an initial ("J. Smith"), or a period followed straight
+ * by more punctuation ("Inc.,") or a lowercase word ("etc. and") all leave
+ * the sentence running. A period only ends one when it's followed (after
+ * any closing quote or parenthesis) by whitespace or the end of the text.
+ */
+function isSentenceEndingPeriod(text: string, i: number): boolean {
+  if (isInsideNumber(text, i)) return false;
+  let j = i + 1;
+  while (j < text.length && SENTENCE_CLOSERS.includes(text[j])) j++;
+  if (j < text.length && !/\s/.test(text[j])) return false;
+  while (j < text.length && /\s/.test(text[j])) j++;
+  if (j >= text.length) return true;
+
+  const next = text[j];
+  if (/\p{Ll}/u.test(next)) return false;
+
+  const word = wordBefore(text, i);
+  // A paragraph number ("5. ") that htmlToNumberedText prefixed — splitting
+  // it off matches clause mode, where it's the paragraph's first clause.
+  if (word === "") return true;
+  if (word.length === 1 && LETTERED_REFERENCE.test(text.slice(Math.max(0, i - 20), i))) return true;
+  if (isAbbreviation(word)) return false;
+  if (MAYBE_TERMINAL_ABBREVIATIONS.has(word.toLowerCase())) return /\p{Lu}/u.test(next);
+  return true;
+}
+
+/**
+ * Splits text into sentences, where a sentence ends at . ? ! — or at ; or :,
+ * which in contracts separate the items of a list run inside one sentence.
+ * Like splitClauses, each piece keeps its terminator plus any closing quotes
+ * or parentheses and trailing spaces (never a newline), bracketed
+ * placeholders are never split, and joining the pieces reproduces the text.
+ */
+export function splitSentences(text: string): string[] {
+  const sentences: string[] = [];
+  let start = 0;
+  let bracketDepth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "[") {
+      bracketDepth++;
+      continue;
+    }
+    if (ch === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+    if (bracketDepth > 0) continue;
+
+    let isBoundary: boolean;
+    if (ch === ".") isBoundary = isSentenceEndingPeriod(text, i);
+    else if (ch === ":") isBoundary = !(/\d/.test(text[i - 1] ?? "") && /\d/.test(text[i + 1] ?? "")); // "10:30"
+    else isBoundary = "?!;".includes(ch);
+    if (!isBoundary) continue;
+
+    let end = i + 1;
+    // Absorb a run of terminators ("?!", "...") into the same sentence.
+    while (end < text.length && ".?!".includes(text[end])) end++;
+    while (end < text.length && SENTENCE_CLOSERS.includes(text[end])) end++;
+    while (end < text.length && (text[end] === " " || text[end] === "\t")) end++;
+    sentences.push(text.slice(start, end));
+    start = end;
+    i = end - 1;
+  }
+  if (start < text.length) sentences.push(text.slice(start));
+  return sentences.length ? sentences : [text];
+}
+
 // Two clauses count as the same for matching purposes even if only their
 // boundary punctuation differs (e.g. "...course." vs "...course," when a
 // clause that used to end a sentence now continues into a new one) — the
 // rendered value still keeps each clause's own exact original punctuation;
 // this only affects whether diffArrays treats them as an unchanged match.
 function normalizeForCompare(clause: string): string {
-  return clause.trim().replace(/[,.:;]+["']?$/, "").trim();
+  return clause.trim().replace(/[,.:;]+["'\u201D\u2019]?$/, "").trim();
 }
 
 /**
@@ -150,9 +262,13 @@ function normalizeForCompare(clause: string): string {
  * lightly edited clause still gets a precise word diff, while a wholly
  * different one reads as a clean strikethrough+insert instead of a word
  * salad of coincidentally shared words.
+ *
+ * With granularity "sentence" the same pairing runs over whole sentences
+ * (and ;/: list items) instead — see splitSentences.
  */
-function diffParagraph(oldParagraph: string, newParagraph: string): Change[] {
-  const clauseChanges = diffArrays(splitClauses(oldParagraph), splitClauses(newParagraph), {
+function diffParagraph(oldParagraph: string, newParagraph: string, granularity: RedlineGranularity): Change[] {
+  const split = granularity === "sentence" ? splitSentences : splitClauses;
+  const clauseChanges = diffArrays(split(oldParagraph), split(newParagraph), {
     comparator: (a, b) => normalizeForCompare(a) === normalizeForCompare(b),
   });
   const changes: Change[] = [];
@@ -256,7 +372,7 @@ function wholeParagraph(paragraph: string, flags: { added?: boolean; removed?: b
 /** A matched old/new paragraph pair whose text differs. Two table rows are
  * diffed cell-by-cell against their positional counterpart, so an edit in
  * one cell can never be matched against text from a neighboring cell. */
-function changedParagraph(oldPara: string, newPara: string): Change[] {
+function changedParagraph(oldPara: string, newPara: string, granularity: RedlineGranularity): Change[] {
   if (isTableRow(oldPara) && isTableRow(newPara)) {
     const oldCells = rowCells(oldPara);
     const newCells = rowCells(newPara);
@@ -264,14 +380,14 @@ function changedParagraph(oldPara: string, newPara: string): Change[] {
     for (let k = 0; k < Math.max(oldCells.length, newCells.length); k++) {
       const o = oldCells[k] ?? "";
       const n = newCells[k] ?? "";
-      cells.push(o === n ? [{ value: o } as Change] : diffParagraph(o, n));
+      cells.push(o === n ? [{ value: o } as Change] : diffParagraph(o, n, granularity));
     }
     return rowChanges(cells);
   }
   if (isTableRow(oldPara) || isTableRow(newPara)) {
     return [...wholeParagraph(oldPara, { removed: true }), ...wholeParagraph(newPara, { added: true })];
   }
-  const paraChanges = diffParagraph(oldPara, newPara);
+  const paraChanges = diffParagraph(oldPara, newPara, granularity);
   return paraChanges.map((c, idx) =>
     idx === paraChanges.length - 1 ? ({ ...c, value: withTrailingBreak(c.value) } as Change) : c
   );
@@ -292,11 +408,15 @@ function changedParagraph(oldPara: string, newPara: string): Change[] {
  *
  * Diffing is done in three passes, each anchored on the one before it so a
  * flat LCS never gets the chance to match content across unrelated regions:
- * paragraphs first, then clauses within a matched removed/added paragraph
- * pair (see diffParagraph), then words within a matched pair of clauses
- * (see wordDiffOrReplace).
+ * paragraphs first, then clauses (or sentences, per granularity) within a
+ * matched removed/added paragraph pair (see diffParagraph), then words
+ * within a matched pair of clauses (see wordDiffOrReplace).
  */
-export function computeRedline(oldText: string, newText: string): RedlineDiff {
+export function computeRedline(
+  oldText: string,
+  newText: string,
+  granularity: RedlineGranularity = "clause"
+): RedlineDiff {
   const oldParagraphs = splitParagraphs(oldText);
   const newParagraphs = splitParagraphs(newText);
   const paragraphChanges = diffArrays(oldParagraphs, newParagraphs, {
@@ -342,7 +462,7 @@ export function computeRedline(oldText: string, newText: string): RedlineDiff {
           oldStatus.push("unchanged");
           newStatus.push("unchanged");
         } else {
-          changedParagraph(oldPara, para).forEach(record);
+          changedParagraph(oldPara, para, granularity).forEach(record);
           oldStatus.push("changed");
           newStatus.push("changed");
         }
@@ -363,7 +483,7 @@ export function computeRedline(oldText: string, newText: string): RedlineDiff {
 
     const pairCount = Math.min(removedParas.length, addedParas.length);
     for (let p = 0; p < pairCount; p++) {
-      changedParagraph(removedParas[p], addedParas[p]).forEach(record);
+      changedParagraph(removedParas[p], addedParas[p], granularity).forEach(record);
       oldStatus.push("changed");
       newStatus.push("changed");
     }
