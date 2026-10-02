@@ -5,6 +5,7 @@ import {
   reposRepo,
   participantsRepo,
   prRepo,
+  branchOriginsRepo,
   listBranches,
   readBlob,
   listTree,
@@ -72,6 +73,16 @@ reposRouter.get("/:repoId/branches", (req, res) => {
   const repo = reposRepo.get(req.params.repoId);
   if (!repo) return res.status(404).json({ error: "repo not found" });
   res.json(listBranches(repo.bare_path));
+});
+
+// The PR a branch was created from via "revision branch", if any —
+// { pr: null } for any other branch.
+reposRouter.get("/:repoId/branch-origin", (req, res) => {
+  const repo = reposRepo.get(req.params.repoId);
+  if (!repo) return res.status(404).json({ error: "repo not found" });
+  const branch = req.query.branch as string;
+  if (!branch) return res.status(400).json({ error: "branch is required" });
+  res.json({ pr: branchOriginsRepo.sourcePr(repo.id, branch) ?? null });
 });
 
 reposRouter.get("/:repoId/tree", (req, res) => {

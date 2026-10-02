@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeRedline } from "./redline.js";
+import { computeRedline, splitSentences } from "./redline.js";
 import { ROW_START, CELL_SEP } from "./tableMarkers.js";
 
 test("computeRedline marks a substituted word as removed+added", () => {
-  const { changes, stats } = computeRedline("The term is one year.", "The term is TWO years.");
+  const { changes, stats } = computeRedline("The term is one year.", "The term is TWO years.", "clause");
   const removed = changes.filter((c) => c.removed).map((c) => c.value);
   const added = changes.filter((c) => c.added).map((c) => c.value);
   assert.deepEqual(removed, ["one", "year"]);
@@ -57,7 +57,7 @@ test("computeRedline diffs at clause granularity, leaving unrelated clauses in t
   const oldText = "First clause, second clause, this is the old ending clause.";
   const newText = "First clause, second clause, this is a totally different unrelated new ending.";
 
-  const { changes } = computeRedline(oldText, newText);
+  const { changes } = computeRedline(oldText, newText, "clause");
   const unchangedText = changes
     .filter((c) => !c.added && !c.removed)
     .map((c) => c.value)
@@ -102,7 +102,7 @@ test("computeRedline treats two clauses as unchanged when only their boundary pu
     "Shared clause, or destroy copies of Confidential Information in the ordinary course, " +
     "provided that such retained copies remain subject to this agreement and are not used for any purpose.";
 
-  const { changes } = computeRedline(oldText, newText);
+  const { changes } = computeRedline(oldText, newText, "clause");
   const unchangedText = changes
     .filter((c) => !c.added && !c.removed)
     .map((c) => c.value)
@@ -200,7 +200,7 @@ test("computeRedline doesn't split a clause on a comma inside a bracketed placeh
   const oldText = "and [•], a [•] [•] located at [•].";
   const newText = "and [Data Center, LLC], a [Texas Limited Liability Company] [] located at [2722 Travis, Houston TX 77002].";
 
-  const { changes } = computeRedline(oldText, newText);
+  const { changes } = computeRedline(oldText, newText, "clause");
   const removed = changes.filter((c) => c.removed).map((c) => c.value);
   const added = changes.filter((c) => c.added).map((c) => c.value);
 
@@ -229,7 +229,7 @@ test("computeRedline doesn't join multiple unmatched clauses into one blob befor
     "including as to the posting of bond or other security. " +
     "Recipient waives any claim or defense.";
 
-  const { changes } = computeRedline(oldText, newText);
+  const { changes } = computeRedline(oldText, newText, "clause");
 
   const removed = changes.filter((c) => c.removed).map((c) => c.value.trim());
   const added = changes.filter((c) => c.added).map((c) => c.value.trim());
@@ -251,7 +251,8 @@ test("computeRedline doesn't join multiple unmatched clauses into one blob befor
 test("computeRedline keeps a lightly edited paragraph as a precise word-level diff", () => {
   const { changes } = computeRedline(
     "The Recipient shall keep the Confidential Information secret for one year.",
-    "The Recipient shall keep the Confidential Information secret for TWO years."
+    "The Recipient shall keep the Confidential Information secret for TWO years.",
+    "clause"
   );
   const removed = changes.filter((c) => c.removed).map((c) => c.value);
   const added = changes.filter((c) => c.added).map((c) => c.value);
@@ -282,4 +283,171 @@ test("computeRedline diffs table rows cell-by-cell and keeps the row/cell marker
   const end = changes.findIndex((c, i) => i > start && c.value === "\n\n");
   const newRow = changes.slice(start, end).filter((c) => !c.removed).map((c) => c.value).join("");
   assert.equal(newRow, row("Type A", "10,000", "$900"));
+});
+
+test("splitSentences splits on . ? ! and on the ; : that run a list inside a contract sentence", () => {
+  const text =
+    "including, without limitation, the following force majeure events (\u201DForce Majeure Event(s)\u201D): " +
+    "(i) acts of God; (ii) flood, fire, earthquake, pandemic, epidemic, or explosion; " +
+    "(iii) war, invasion, hostilities (whether war is declared or not), terrorist threats or acts, riot or other civil unrest; " +
+    "(iv) government order, law, or actions. Is that clear? Yes!";
+  const sentences = splitSentences(text);
+  assert.deepEqual(sentences, [
+    "including, without limitation, the following force majeure events (\u201DForce Majeure Event(s)\u201D): ",
+    "(i) acts of God; ",
+    "(ii) flood, fire, earthquake, pandemic, epidemic, or explosion; ",
+    "(iii) war, invasion, hostilities (whether war is declared or not), terrorist threats or acts, riot or other civil unrest; ",
+    "(iv) government order, law, or actions. ",
+    "Is that clear? ",
+    "Yes!",
+  ]);
+  assert.equal(sentences.join(""), text);
+});
+
+test("splitSentences doesn't end a sentence at a period that isn't a sentence end", () => {
+  const cases = [
+    "Pay $1,100.50 under Section 3.1 by 10:30 a.m. on the due date.",
+    "See e.g. the U.S. rules and No. 5 thereof.",
+    "Signed by J. Smith for Acme Inc., a Delaware corporation.",
+    "Fees, costs, etc. are payable [at Suite 4. Floor 2] monthly.",
+  ];
+  for (const text of cases) assert.deepEqual(splitSentences(text), [text], text);
+});
+
+test("splitSentences still ends a sentence after a lettered exhibit, a company suffix, or a closing quote", () => {
+  assert.deepEqual(splitSentences("As set out in Exhibit A. The Buyer shall pay."), [
+    "As set out in Exhibit A. ",
+    "The Buyer shall pay.",
+  ]);
+  assert.deepEqual(splitSentences("Sold to Acme Inc. The Buyer shall pay."), [
+    "Sold to Acme Inc. ",
+    "The Buyer shall pay.",
+  ]);
+  assert.deepEqual(splitSentences('It is "final." Nothing else applies.'), ['It is "final." ', "Nothing else applies."]);
+});
+
+test("computeRedline sentence granularity word-diffs a whole list item rather than comma-split fragments", () => {
+  const oldText = "Force majeure includes: (i) acts of God; (ii) flood, fire, or explosion; (iii) war.";
+  const newText = "Force majeure includes: (i) acts of God; (ii) flood, fire, earthquake, or explosion; (iii) war.";
+
+  const sentence = computeRedline(oldText, newText, "sentence");
+  assert.deepEqual(
+    sentence.changes.filter((c) => c.added).map((c) => c.value),
+    ["earthquake, "]
+  );
+  assert.equal(sentence.changes.filter((c) => c.removed).length, 0);
+  assert.equal(sentence.changes.map((c) => (c.removed ? "" : c.value)).join(""), newText + "\n\n");
+});
+
+test("computeRedline defaults to sentence granularity", () => {
+  const oldText = "Alpha beta, gamma delta. Epsilon zeta.";
+  const newText = "Alpha beta, gamma delta. Epsilon eta.";
+  assert.deepEqual(computeRedline(oldText, newText), computeRedline(oldText, newText, "sentence"));
+});
+
+// Renders a redline as text, [-struck-] and {+inserted+}, with one "\n"
+// between paragraphs, for readable assertions.
+function render(oldText: string, newText: string): string {
+  return computeRedline(oldText, newText, "sentence")
+    .changes.map((c) => {
+      const value = c.value.replace(/\n\n$/, "");
+      const brk = c.value.endsWith("\n\n") ? "\n" : "";
+      return (c.added ? `{+${value}+}` : c.removed ? `[-${value}-]` : value) + brk;
+    })
+    .join("")
+    .trimEnd();
+}
+
+test("sentence mode groups a replaced phrase into one struck run and one inserted run", () => {
+  assert.equal(
+    render(
+      "(c)  Seller may, in its sole discretion, without liability or penalty, tender delivery of Goods to Buyer.",
+      "(c)  Seller may, with Buyer’s prior written consent, tender delivery of Goods to Buyer."
+    ),
+    "(c)  Seller may, [-in its sole discretion, without liability or penalty-]{+with Buyer’s prior written consent+}, tender delivery of Goods to Buyer."
+  );
+  assert.equal(
+    render(
+      "(d)  If for any reason Buyer fails to accept delivery of any of the Goods by the Delivery Date, Buyer shall bear the risk of loss.",
+      "(d)  If Buyer’s material, uncured breach prevents delivery by the Delivery Date, Buyer shall bear the risk of loss."
+    ),
+    "(d)  If [-for any reason Buyer fails to accept delivery of any of the Goods -]{+Buyer’s material, uncured breach prevents delivery +}by the Delivery Date, Buyer shall bear the risk of loss."
+  );
+});
+
+test("sentence mode keeps a changed figure and its parenthetical together", () => {
+  assert.equal(
+    render("Notice within five (5) days of the time when Buyer discovers the defect.", "Notice within twenty (20) days of the time when Buyer discovers the defect."),
+    "Notice within [-five (5)-]{+twenty (20)+} days of the time when Buyer discovers the defect."
+  );
+});
+
+test("sentence mode still shows a light edit as a precise inline change", () => {
+  assert.equal(
+    render(
+      "Seller warrants to Buyer that for a period of 6 months from the date Seller tenders delivery of the Goods (”Warranty Period”), such Goods will conform.",
+      "Seller warrants to Buyer that for a period of 6 months from the date Buyer accepts the Goods (”Warranty Period”), such Goods will conform."
+    ),
+    "Seller warrants to Buyer that for a period of 6 months from the date [-Seller tenders delivery of -]{+Buyer accepts +}the Goods (”Warranty Period”), such Goods will conform."
+  );
+});
+
+test("sentence mode strikes a rewritten sentence whole instead of word-by-word", () => {
+  assert.equal(
+    render(
+      "5.  Title and Risk of Loss. Title and risk of loss pass to Buyer upon tender of delivery of the Goods at the Delivery Location.",
+      "5.  Title and Risk of Loss. Title to and risk of loss of the Goods shall pass to Buyer only upon Buyer's acceptance of such Goods pursuant to Section 6."
+    ),
+    "5.  Title and Risk of Loss. [-Title and risk of loss pass to Buyer upon tender of delivery of the Goods at the Delivery Location.-]{+Title to and risk of loss of the Goods shall pass to Buyer only upon Buyer's acceptance of such Goods pursuant to Section 6.+}"
+  );
+});
+
+test("sentence mode pairs paragraphs by content, not position, after a deletion", () => {
+  const oldText =
+    "(b)  IN NO EVENT SHALL SELLER’S AGGREGATE LIABILITY EXCEED THE AMOUNTS PAID TO SELLER.\n\n" +
+    "12.  Compliance with Law. Buyer is in compliance with and shall comply with all applicable laws, regulations, and ordinances.\n\n" +
+    "13.  Termination. Seller may terminate this Agreement upon written notice to Buyer, if Buyer fails to pay any amount when due.";
+  const newText =
+    "12.  Compliance with Law. Each party shall comply with all applicable laws, regulations, and ordinances.\n\n" +
+    "13.  Termination. Either Party may terminate this Agreement upon written notice to the other Party, if the other Party fails to pay any amount when due.";
+
+  const { paragraphStatus } = computeRedline(oldText, newText, "sentence");
+  assert.deepEqual(paragraphStatus.old, ["removed", "changed", "changed"]);
+  assert.deepEqual(paragraphStatus.new, ["changed", "changed"]);
+  const out = render(oldText, newText);
+  assert.equal(
+    out,
+    "[-(b)  IN NO EVENT SHALL SELLER’S AGGREGATE LIABILITY EXCEED THE AMOUNTS PAID TO SELLER.-]\n" +
+      "12.  Compliance with Law. [-Buyer is in compliance with and -]{+Each party +}shall comply with all applicable laws, regulations, and ordinances.\n" +
+      "13.  Termination. [-Seller -]{+Either Party +}may terminate this Agreement upon written notice to [-Buyer-]{+the other Party+}, if [-Buyer -]{+the other Party +}fails to pay any amount when due."
+  );
+});
+
+test("sentence mode shows replaced sentences as one struck block then one inserted block", () => {
+  const out = render(
+    "Seller estimates delivery. Seller shall not be liable for any delay in delivery or loss in transit.",
+    "Seller estimates delivery. Seller shall deliver the goods at the delivery location on time. Seller shall be responsible for the transportation of the goods."
+  );
+  assert.equal(
+    out,
+    "Seller estimates delivery. [-Seller shall not be liable for any delay in delivery or loss in transit.-]{+Seller shall deliver the goods at the delivery location on time. Seller shall be responsible for the transportation of the goods.+}"
+  );
+});
+
+test("deleting a paragraph's last sentence keeps the break before the next paragraph on both sides", () => {
+  const oldText = "Remedies are exclusive. Buyer has no right to return Goods.\n\n7. Taxes. Prices exclude taxes.\n\n";
+  const newText = "Remedies are exclusive.\n\n7. Taxes. Prices exclude taxes.\n\n";
+  for (const granularity of ["sentence", "clause"] as const) {
+    const { changes } = computeRedline(oldText, newText, granularity);
+    assert.equal(changes.filter((c) => !c.removed).map((c) => c.value).join(""), newText);
+    assert.match(changes.filter((c) => !c.added).map((c) => c.value).join(""), /Goods\.\n\n7\. Taxes/);
+  }
+});
+
+test("replacing a paragraph's last sentence keeps the break on the old side too", () => {
+  const oldText = "Alpha. Delivery is due in June.\n\nBeta.\n\n";
+  const newText = "Alpha. Delivery is due whenever Seller likes, at its sole discretion!\n\nBeta.\n\n";
+  const { changes } = computeRedline(oldText, newText);
+  assert.equal(changes.filter((c) => !c.removed).map((c) => c.value).join(""), newText);
+  assert.equal(changes.filter((c) => !c.added).map((c) => c.value).join(""), oldText);
 });

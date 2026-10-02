@@ -11,6 +11,8 @@
   --added-fg: #166534;
   --removed-bg: #fee2e2;
   --removed-fg: #991b1b;
+  --user-bg: #dbeafe;
+  --user-fg: #1e40af;
   --card-bg: #f9fafb;
 }
 
@@ -27,6 +29,8 @@
     --added-fg: #86efac;
     --removed-bg: #450a0a;
     --removed-fg: #fca5a5;
+    --user-bg: #172554;
+    --user-fg: #93c5fd;
     --card-bg: #171a21;
   }
 }
@@ -155,6 +159,21 @@ input, textarea {
 .redline ins { background: var(--added-bg); color: var(--added-fg); text-decoration: none; }
 .redline del { background: var(--removed-bg); color: var(--removed-fg); }
 .redline { white-space: pre-wrap; line-height: 1.6; }
+/* Local tab's editable redline: the user's own edits get their own color,
+   apart from the PR's green insertions. */
+.redline .user-ins, .redline-editor-legend .user-ins { background: var(--user-bg); color: var(--user-fg); }
+.redline-editor-legend ins { background: var(--added-bg); color: var(--added-fg); text-decoration: none; }
+.redline-editor-legend del { background: var(--removed-bg); color: var(--removed-fg); }
+.redline-editor-legend { font-size: 13px; display: flex; gap: 6px; align-items: center; }
+.redline-editor-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.redline-editor {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  outline: none;
+}
+.redline-editor:focus { border-color: var(--accent); }
+.redline-editor p { margin: 0 0 1em; }
 /* Tables in both the redline and the formatted view get visible cell
    borders — mammoth emits bare <table>/<td> with no styling, so without
    this every row reads as one run-on line of text. */

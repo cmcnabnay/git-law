@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Repo } from "../api/client.js";
+import { api, type PullRequest, type Repo } from "../api/client.js";
 import { formatBytes } from "../format.js";
 import { FsaFs } from "../local/fsaFs.js";
 import {
@@ -24,6 +24,11 @@ import {
   type LocalFileEntry,
 } from "../local/localGit.js";
 import { isPreviewableDocument, docxBytesToHtml } from "../local/docxPreview.js";
+// Deep imports, like docxPreview's: browser-safe modules only.
+import { htmlToNumberedText } from "@gitlaw/core/src/diff/numberedText.js";
+import { overlayLocalEdits, type EditableChange } from "@gitlaw/core/src/diff/editableRedline.js";
+import { saveParagraphEditsToDocx } from "@gitlaw/core/src/diff/docxPatch.js";
+import { RedlineEditor } from "./RedlineEditor.js";
 
 type Phase = "checking" | "no-handle" | "needs-permission" | "not-a-repo" | "ready";
 
@@ -49,6 +54,15 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // The PR the checked-out branch was created from to revise (see
+  // "Revise on a new branch" on the PR page), if any — its redline is what
+  // the "PR changes" view edits against.
+  const [originPr, setOriginPr] = useState<PullRequest | null>(null);
+  const [previewMode, setPreviewMode] = useState<"document" | "changes">("document");
+  const [editorChanges, setEditorChanges] = useState<EditableChange[] | null>(null);
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
 
   const [commitMessage, setCommitMessage] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -101,6 +115,9 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
       const fs = new FsaFs(dirHandle);
       const s = await getStatus(fs);
       setStatus(s);
+      setOriginPr(
+        s.currentBranch ? (await api.getBranchOrigin(repo.id, s.currentBranch).catch(() => ({ pr: null }))).pr : null
+      );
       if (s.currentBranch) {
         setTreeError(null);
         try {
@@ -231,6 +248,9 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
     setPreviewPath(path);
     setPreviewHtml(null);
     setPreviewError(null);
+    setPreviewMode("document");
+    setEditorChanges(null);
+    setEditorError(null);
     if (!isPreviewableDocument(path)) {
       setPreviewError("not-supported");
       return;
@@ -245,6 +265,48 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
     } finally {
       setPreviewLoading(false);
     }
+  }
+
+  async function handlePreviewModeChange(mode: "document" | "changes") {
+    setPreviewMode(mode);
+    if (mode === "changes" && previewPath) await loadChanges(previewPath);
+  }
+
+  /** The origin PR's redline for this file, with whatever the file on disk
+   * has changed since the PR's version overlaid as the user's own edits. */
+  async function loadChanges(path: string) {
+    if (!handle || !originPr) return;
+    setEditorLoading(true);
+    setEditorError(null);
+    setEditorChanges(null);
+    try {
+      const fs = new FsaFs(handle);
+      const [detail, head, bytes] = await Promise.all([
+        api.getPr(repo.id, originPr.id),
+        // 404s when the file doesn't exist in the PR's version.
+        api.getPreview(repo.id, originPr.head_sha, path).catch(() => null),
+        fs.promises.readFile(path) as Promise<Uint8Array>,
+      ]);
+      const headText = head ? htmlToNumberedText(head.html) : "";
+      const currentText = htmlToNumberedText(await docxBytesToHtml(bytes));
+      // A file the PR didn't touch has no redline: all of it is unchanged.
+      const prChanges = detail.diffs.find((d) => d.path === path)?.redline.changes ?? (headText ? [{ value: headText }] : []);
+      const changes = overlayLocalEdits(prChanges, headText, currentText);
+      if (!changes) throw new Error("The pull request's redline doesn't line up with its version of this file.");
+      setEditorChanges(changes);
+    } catch (e: any) {
+      setEditorError(e.message);
+    } finally {
+      setEditorLoading(false);
+    }
+  }
+
+  async function handleSaveEdits(original: string[], edited: string[]) {
+    if (!handle || !previewPath) return;
+    const fs = new FsaFs(handle);
+    const bytes = (await fs.promises.readFile(previewPath)) as Uint8Array;
+    await fs.promises.writeFile(previewPath, await saveParagraphEditsToDocx(bytes, original, edited));
+    await refreshStatus(handle);
   }
 
   async function handleDownloadFile(path: string) {
@@ -284,6 +346,8 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
       setBusy(null);
     }
   }
+
+  const showChanges = previewMode === "changes" && originPr !== null;
 
   if (!SUPPORTED) {
     return (
@@ -462,28 +526,48 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
               {previewPath}
             </strong>
             <div style={{ display: "flex", gap: 8 }}>
+              {originPr && isPreviewableDocument(previewPath) && (
+                <select
+                  value={previewMode}
+                  onChange={(e) => handlePreviewModeChange(e.target.value as "document" | "changes")}
+                  style={{ width: "auto" }}
+                >
+                  <option value="document">Document</option>
+                  <option value="changes">
+                    PR changes ({originPr.branch} → {originPr.base_branch ?? originPr.target_branch})
+                  </option>
+                </select>
+              )}
               <button onClick={() => handleDownloadFile(previewPath)}>Download</button>
               <button onClick={() => setPreviewPath(null)}>Close</button>
             </div>
           </div>
 
-          {previewLoading && <p>Loading preview...</p>}
+          {showChanges && (
+            <div style={{ marginTop: 12 }}>
+              {editorLoading && <p>Loading changes...</p>}
+              {editorError && <p style={{ color: "var(--danger)" }}>Couldn't load the pull request's changes: {editorError}</p>}
+              {editorChanges && <RedlineEditor changes={editorChanges} onSave={handleSaveEdits} />}
+            </div>
+          )}
 
-          {!previewLoading && previewError === "not-supported" && (
+          {!showChanges && previewLoading && <p>Loading preview...</p>}
+
+          {!showChanges && !previewLoading && previewError === "not-supported" && (
             <p style={{ color: "var(--muted)" }}>
               Git Law can only render <code className="mono">.docx</code> files in the browser. This file is a
               different format, so there's no inline preview — use Download above to open it.
             </p>
           )}
 
-          {!previewLoading && previewError && previewError !== "not-supported" && (
+          {!showChanges && !previewLoading && previewError && previewError !== "not-supported" && (
             <div>
               <p style={{ color: "var(--danger)" }}>Couldn't render a preview: {previewError}</p>
               <p style={{ color: "var(--muted)", fontSize: 13 }}>Use Download above to open it in Word instead.</p>
             </div>
           )}
 
-          {!previewLoading && !previewError && previewHtml !== null && (
+          {!showChanges && !previewLoading && !previewError && previewHtml !== null && (
             <div className="formatted-view">
               <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
             </div>
