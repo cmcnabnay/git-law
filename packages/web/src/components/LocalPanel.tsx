@@ -57,7 +57,8 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
 
   // The PR the checked-out branch was created from to revise (see
   // "Revise on a new branch" on the PR page), if any — its redline is what
-  // the "PR changes" view edits against.
+  // the editor edits against. A branch with no PR (e.g. one made off the
+  // default branch to sign) edits against the default branch's version.
   const [originPr, setOriginPr] = useState<PullRequest | null>(null);
   const [previewMode, setPreviewMode] = useState<"document" | "changes">("document");
   const [editorChanges, setEditorChanges] = useState<EditableChange[] | null>(null);
@@ -272,27 +273,28 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
     if (mode === "changes" && previewPath) await loadChanges(previewPath);
   }
 
-  /** The origin PR's redline for this file, with whatever the file on disk
-   * has changed since the PR's version overlaid as the user's own edits. */
+  /** The origin PR's redline for this file — or, on a branch with no PR,
+   * the default branch's version of it, unmarked — with whatever the file
+   * on disk has changed since then overlaid as the user's own edits. */
   async function loadChanges(path: string) {
-    if (!handle || !originPr) return;
+    if (!handle) return;
     setEditorLoading(true);
     setEditorError(null);
     setEditorChanges(null);
     try {
       const fs = new FsaFs(handle);
       const [detail, head, bytes] = await Promise.all([
-        api.getPr(repo.id, originPr.id),
-        // 404s when the file doesn't exist in the PR's version.
-        api.getPreview(repo.id, originPr.head_sha, path).catch(() => null),
+        originPr ? api.getPr(repo.id, originPr.id) : null,
+        // 404s when the file doesn't exist in that version.
+        api.getPreview(repo.id, originPr ? originPr.head_sha : repo.default_branch, path).catch(() => null),
         fs.promises.readFile(path) as Promise<Uint8Array>,
       ]);
       const headText = head ? htmlToNumberedText(head.html) : "";
       const currentText = htmlToNumberedText(await docxBytesToHtml(bytes));
       // A file the PR didn't touch has no redline: all of it is unchanged.
-      const prChanges = detail.diffs.find((d) => d.path === path)?.redline.changes ?? (headText ? [{ value: headText }] : []);
+      const prChanges = detail?.diffs.find((d) => d.path === path)?.redline.changes ?? (headText ? [{ value: headText }] : []);
       const changes = overlayLocalEdits(prChanges, headText, currentText);
-      if (!changes) throw new Error("The pull request's redline doesn't line up with its version of this file.");
+      if (!changes) throw new Error("The redline doesn't line up with its version of this file.");
       setEditorChanges(changes);
     } catch (e: any) {
       setEditorError(e.message);
@@ -347,7 +349,7 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
     }
   }
 
-  const showChanges = previewMode === "changes" && originPr !== null;
+  const showChanges = previewMode === "changes";
 
   if (!SUPPORTED) {
     return (
@@ -526,7 +528,7 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
               {previewPath}
             </strong>
             <div style={{ display: "flex", gap: 8 }}>
-              {originPr && isPreviewableDocument(previewPath) && (
+              {isPreviewableDocument(previewPath) && (
                 <select
                   value={previewMode}
                   onChange={(e) => handlePreviewModeChange(e.target.value as "document" | "changes")}
@@ -534,7 +536,9 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
                 >
                   <option value="document">Document</option>
                   <option value="changes">
-                    PR changes ({originPr.branch} → {originPr.base_branch ?? originPr.target_branch})
+                    {originPr
+                      ? `PR changes (${originPr.branch} → ${originPr.base_branch ?? originPr.target_branch})`
+                      : `Edit (changes from ${repo.default_branch})`}
                   </option>
                 </select>
               )}
@@ -546,7 +550,7 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
           {showChanges && (
             <div style={{ marginTop: 12 }}>
               {editorLoading && <p>Loading changes...</p>}
-              {editorError && <p style={{ color: "var(--danger)" }}>Couldn't load the pull request's changes: {editorError}</p>}
+              {editorError && <p style={{ color: "var(--danger)" }}>Couldn't open the editor: {editorError}</p>}
               {editorChanges && <RedlineEditor changes={editorChanges} onSave={handleSaveEdits} />}
             </div>
           )}
