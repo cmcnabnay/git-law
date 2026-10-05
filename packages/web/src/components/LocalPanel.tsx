@@ -26,7 +26,7 @@ import {
 import { isPreviewableDocument, docxBytesToHtml } from "../local/docxPreview.js";
 // Deep imports, like docxPreview's: browser-safe modules only.
 import { htmlToNumberedText } from "@gitlaw/core/src/diff/numberedText.js";
-import { overlayLocalEdits, type EditableChange } from "@gitlaw/core/src/diff/editableRedline.js";
+import { overlayLocalEdits, unchangedText, type EditableChange } from "@gitlaw/core/src/diff/editableRedline.js";
 import { saveEditsToDocx, type EditorContent } from "@gitlaw/core/src/diff/docxPatch.js";
 import { RedlineEditor } from "./RedlineEditor.js";
 
@@ -292,7 +292,7 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
       const headText = head ? htmlToNumberedText(head.html) : "";
       const currentText = htmlToNumberedText(await docxBytesToHtml(bytes));
       // A file the PR didn't touch has no redline: all of it is unchanged.
-      const prChanges = detail?.diffs.find((d) => d.path === path)?.redline.changes ?? (headText ? [{ value: headText }] : []);
+      const prChanges = detail?.diffs.find((d) => d.path === path)?.redline.changes ?? unchangedText(headText);
       const changes = overlayLocalEdits(prChanges, headText, currentText);
       if (!changes) throw new Error("The redline doesn't line up with its version of this file.");
       setEditorChanges(changes);

@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computeRedline } from "./redline.js";
-import { overlayLocalEdits, type EditableChange } from "./editableRedline.js";
+import { overlayLocalEdits, unchangedText, type EditableChange } from "./editableRedline.js";
+import { ROW_START, CELL_SEP } from "./tableMarkers.js";
 
 // [-struck-] {+PR insertion+} {~user insertion~}
 function render(changes: EditableChange[]): string {
@@ -37,4 +38,19 @@ test("the new side of the overlay is exactly the current text", () => {
 test("returns null when the redline doesn't match the head text", () => {
   const pr = computeRedline(base, head).changes;
   assert.equal(overlayLocalEdits(pr, "something else\n\n", head), null);
+});
+
+test("unmarked text keeps table markers as changes of their own, so tables render as tables", () => {
+  const text = `IN WITNESS WHEREOF.\n\n${ROW_START}${CELL_SEP}Data Center, LLC\n\n${ROW_START}${CELL_SEP}By____ Name: Brenlee Fox\n\nEXHIBIT A\n\n`;
+  const changes = unchangedText(text);
+  assert.equal(changes.map((c) => c.value).join(""), text);
+  for (const c of changes) {
+    if (c.value.includes(ROW_START) || c.value.includes(CELL_SEP)) assert.ok(c.value === ROW_START || c.value === CELL_SEP, JSON.stringify(c.value));
+  }
+  assert.ok(changes.every((c) => !c.added && !c.removed));
+  // With a local edit on top, the row's markers still stand alone.
+  const edited = text.replace("By____", "By__/s/ Brenlee Fox__");
+  const overlay = overlayLocalEdits(changes, text, edited)!;
+  assert.ok(overlay.some((c) => c.user && c.value.includes("/s/")));
+  assert.equal(overlay.filter((c) => c.value === ROW_START).length, 2);
 });

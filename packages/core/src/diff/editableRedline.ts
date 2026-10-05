@@ -70,6 +70,14 @@ export function overlayLocalEdits(
   return group(chars);
 }
 
+/** `text` (htmlToNumberedText's output) with nothing marked, laid out the
+ * way a redline is — table markers and paragraph breaks as changes of their
+ * own — so the editor shows its tables as tables. For a document with no
+ * redline to show: a file the PR didn't touch, or a branch with no PR. */
+export function unchangedText(text: string): EditableChange[] {
+  return group(Array.from(text, (ch) => ({ ch, kind: "plain" as Kind })));
+}
+
 /** Merges runs of same-kind characters back into changes, keeping table
  * markers and "\n\n" paragraph breaks as changes of their own — the
  * renderer recognizes those by exact value (see RedlineDiffView's
