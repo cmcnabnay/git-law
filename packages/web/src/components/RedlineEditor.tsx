@@ -71,7 +71,7 @@ export function RedlineEditor({
     };
   }, []);
 
-  function applyToSelection(action: "accept" | "restore") {
+  function applyToSelection(action: Action) {
     const root = rootRef.current;
     const sel = window.getSelection();
     if (!root || !sel || sel.rangeCount === 0 || sel.isCollapsed) {
@@ -80,29 +80,103 @@ export function RedlineEditor({
     }
     const range = sel.getRangeAt(0);
     if (!root.contains(range.commonAncestorContainer)) return;
-    const tags = action === "accept" ? "ins:not(.user-ins), del" : "del";
-    const marks = Array.from(root.querySelectorAll<HTMLElement>(tags)).filter(
-      (el) => range.intersectsNode(el) && !el.closest("[contenteditable=false]")
-    );
-    if (marks.length === 0) {
-      setMessage({
-        error: true,
-        text: action === "accept" ? "The selection has no green or struck text to accept." : "The selection has no struck text to restore.",
-      });
+    if (marksIn(root, range).length === 0) {
+      setMessage({ error: true, text: `The selection has no green or struck text to ${action}.` });
       return;
     }
-    for (const mark of marks) {
-      isolateSelectedPart(mark, range);
-      // Accepting an insertion or restoring a deletion keeps the text as
-      // plain text; accepting a deletion drops the struck text for good.
-      if (action === "accept" && mark.tagName === "DEL") mark.remove();
-      else mark.replaceWith(...Array.from(mark.childNodes));
+    applyToTarget(range, action);
+    sel.removeAllRanges();
+  }
+
+  /** Accepts or rejects the PR marks in `target`: a range (only the part
+   * of each mark inside it) or a single mark element (all of it). */
+  function applyToTarget(target: Range | Element, action: Action) {
+    const root = rootRef.current;
+    if (!root) return;
+    if (target instanceof Element) {
+      resolveMark(target, action);
+    } else {
+      for (const mark of marksIn(root, target)) {
+        isolateSelectedPart(mark, target);
+        resolveMark(mark, action);
+      }
     }
     root.normalize();
-    sel.removeAllRanges();
     setDirty(true);
     setMessage(null);
   }
+
+  // Right-clicking a green or struck mark offers accept/reject for it — or,
+  // if the right-click lands in a selection holding marks, for the
+  // selection. The selection is read on mousedown, before the browser
+  // moves the caret to the click point.
+  const [menu, setMenu] = useState<ContextMenu | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const selectionAtRightClick = useRef<Range | null>(null);
+
+  function handleMouseDown(e: React.MouseEvent) {
+    if (e.button !== 2) return;
+    const sel = window.getSelection();
+    selectionAtRightClick.current =
+      sel && sel.rangeCount > 0 && !sel.isCollapsed ? sel.getRangeAt(0).cloneRange() : null;
+  }
+
+  function handleContextMenu(e: React.MouseEvent) {
+    const root = rootRef.current;
+    if (!root) return;
+    const clicked = (e.target as Element).closest?.(MARKS);
+    const mark = clicked && root.contains(clicked) && !clicked.closest("[contenteditable=false]") ? clicked : null;
+    const saved = selectionAtRightClick.current;
+    const useSelection =
+      saved && marksIn(root, saved).length > 0 && (!mark || saved.intersectsNode(mark));
+    const target = useSelection ? saved : mark;
+    if (!target) return; // plain text: leave the browser's own menu
+    e.preventDefault();
+    if (useSelection) {
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(saved);
+    }
+    setMenu({ x: e.clientX, y: e.clientY, target });
+  }
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onMouseDown = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [menu]);
+
+  function chooseFromMenu(action: Action) {
+    if (!menu) return;
+    applyToTarget(menu.target, action);
+    window.getSelection()?.removeAllRanges();
+    setMenu(null);
+  }
+
+  const menuNoun = !menu
+    ? ""
+    : menu.target instanceof Element
+      ? menu.target.tagName === "INS"
+        ? "insertion"
+        : "deletion"
+      : "selected changes";
 
   async function handleSave() {
     const root = rootRef.current;
@@ -132,8 +206,8 @@ export function RedlineEditor({
         <button onMouseDown={keepSelection} onClick={() => applyToSelection("accept")}>
           Accept
         </button>
-        <button onMouseDown={keepSelection} onClick={() => applyToSelection("restore")}>
-          Restore
+        <button onMouseDown={keepSelection} onClick={() => applyToSelection("reject")}>
+          Reject
         </button>
         <span className="redline-editor-legend">
           <ins>PR insertion</ins> <del>PR deletion</del> <span className={USER_CLASS}>your edit</span>
@@ -151,9 +225,54 @@ export function RedlineEditor({
           {message.text}
         </p>
       )}
-      <div ref={rootRef} className="redline redline-editor" contentEditable suppressContentEditableWarning spellCheck />
+      <div
+        ref={rootRef}
+        className="redline redline-editor"
+        contentEditable
+        suppressContentEditableWarning
+        spellCheck
+        onMouseDown={handleMouseDown}
+        onContextMenu={handleContextMenu}
+      />
+      {menu && (
+        <div ref={menuRef} className="redline-context-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
+          <button role="menuitem" onMouseDown={keepSelection} onClick={() => chooseFromMenu("accept")}>
+            Accept {menuNoun}
+          </button>
+          <button role="menuitem" onMouseDown={keepSelection} onClick={() => chooseFromMenu("reject")}>
+            Reject {menuNoun}
+          </button>
+        </div>
+      )}
     </div>
   );
+}
+
+type Action = "accept" | "reject";
+
+interface ContextMenu {
+  x: number;
+  y: number;
+  target: Range | Element;
+}
+
+/** The PR's own marks — green insertions and struck deletions, not the
+ * user's edits. */
+const MARKS = `ins:not(.${USER_CLASS}), del`;
+
+/** PR marks that `range` touches, outside the read-only tables. */
+function marksIn(root: HTMLElement, range: Range): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(MARKS)).filter(
+    (el) => range.intersectsNode(el) && !el.closest("[contenteditable=false]")
+  );
+}
+
+/** Accepting an insertion or rejecting a deletion keeps the text as plain
+ * text; rejecting an insertion or accepting a deletion drops it. */
+function resolveMark(mark: Element, action: Action): void {
+  const keep = (mark.tagName === "INS") === (action === "accept");
+  if (keep) mark.replaceWith(...Array.from(mark.childNodes));
+  else mark.remove();
 }
 
 /** One <p> per paragraph; tables are shown but not editable (Save leaves
