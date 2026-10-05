@@ -9,3 +9,9 @@
 // without pulling in the rest of @gitlaw/core.
 export const ROW_START = "\u001E";
 export const CELL_SEP = "\u001F";
+
+// Inside a single table cell, a run of tabs or 3+ spaces is how a document
+// fakes columns (e.g. "Type A      10,000      $1,100" typed into one cell)
+// — htmlToNumberedText splits those out as their own columns so they line
+// up like real cells, and docxPatch splits the same way to write them back.
+export const PSEUDO_COLUMN_GAP = /\t+|[  ]{3,}/;

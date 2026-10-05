@@ -1,5 +1,5 @@
 import { parse, NodeType, type HTMLElement, type Node, type TextNode } from "node-html-parser";
-import { ROW_START, CELL_SEP } from "./tableMarkers.js";
+import { ROW_START, CELL_SEP, PSEUDO_COLUMN_GAP } from "./tableMarkers.js";
 
 const BULLET_TAG = "ul";
 const NUMBERED_TAG = "ol";
@@ -42,11 +42,6 @@ function tableRows(table: HTMLElement): HTMLElement[] {
     el.tagName.toLowerCase() === "tr" ? [el] : childElements(el, ["tr"])
   );
 }
-
-// Inside a single table cell, a run of tabs or 3+ spaces is how a document
-// fakes columns (e.g. "Type A      10,000      $1,100" typed into one cell)
-// — split those out as their own columns so they line up like real cells.
-const PSEUDO_COLUMN_GAP = /\t+|[  ]{3,}/;
 
 /** One table row as a single redline "paragraph": ROW_START, then each
  * cell's text separated by CELL_SEP (see tableMarkers.ts). A cell's own

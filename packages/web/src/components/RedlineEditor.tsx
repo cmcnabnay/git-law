@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { EditableChange } from "@gitlaw/core/src/diff/editableRedline.js";
+import type { EditorContent } from "@gitlaw/core/src/diff/docxPatch.js";
 import { toSegments } from "./RedlineDiffView.js";
 
 // An editable redline of a document. The PR's insertions (<ins>) and
 // deletions (<del>) are shown as in the PR view; anything the user types
 // goes into a <span class="user-ins"> of its own color. What the document
-// says is everything on screen except struck text — see paragraphTexts,
-// which is what Save writes back to the file.
+// says is everything on screen except struck text — see editorContent,
+// which is what Save writes back to the file. Table cells are editable
+// too, but a table's rows and cells stay as they are.
 //
 // The editable area is plain DOM managed here, not React state: the browser
 // edits it in place, and React re-rendering it would fight the caret.
@@ -19,10 +21,10 @@ export function RedlineEditor({
 }: {
   changes: EditableChange[];
   /** `original` is the text the editor opened with (what the file holds). */
-  onSave: (original: string[], edited: string[]) => Promise<void>;
+  onSave: (original: EditorContent, edited: EditorContent) => Promise<void>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const originalRef = useRef<string[]>([]);
+  const originalRef = useRef<EditorContent>({ paragraphs: [], rows: [] });
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
@@ -31,7 +33,7 @@ export function RedlineEditor({
     const root = rootRef.current;
     if (!root) return;
     buildDom(root, changes);
-    originalRef.current = paragraphTexts(root);
+    originalRef.current = editorContent(root);
     setDirty(false);
     setMessage(null);
   }
@@ -42,6 +44,21 @@ export function RedlineEditor({
     const root = rootRef.current;
     if (!root) return;
     const onBeforeInput = (e: InputEvent) => {
+      // Keep the tables' shape: no edit may reach across a cell's edge (the
+      // browser would merge a paragraph into a cell, or empty several
+      // cells at once), and Enter can't split a cell's text.
+      const target0 = e.getTargetRanges()[0];
+      const sel0 = window.getSelection();
+      const span = target0 ?? (sel0 && sel0.rangeCount ? sel0.getRangeAt(0) : null);
+      if (span) {
+        const startCell = closestWithin(span.startContainer, root, (el) => el.tagName === "TD");
+        const endCell = closestWithin(span.endContainer, root, (el) => el.tagName === "TD");
+        const lineBreak = e.inputType === "insertParagraph" || e.inputType === "insertLineBreak";
+        if (startCell !== endCell || (startCell && lineBreak)) {
+          e.preventDefault();
+          return;
+        }
+      }
       const text =
         e.inputType === "insertText" || e.inputType === "insertReplacementText"
           ? (e.data ?? e.dataTransfer?.getData("text/plain") ?? "")
@@ -125,7 +142,7 @@ export function RedlineEditor({
     const root = rootRef.current;
     if (!root) return;
     const clicked = (e.target as Element).closest?.(MARKS);
-    const mark = clicked && root.contains(clicked) && !clicked.closest("[contenteditable=false]") ? clicked : null;
+    const mark = clicked && root.contains(clicked) ? clicked : null;
     const saved = selectionAtRightClick.current;
     const useSelection =
       saved && marksIn(root, saved).length > 0 && (!mark || saved.intersectsNode(mark));
@@ -184,7 +201,7 @@ export function RedlineEditor({
     setSaving(true);
     setMessage(null);
     try {
-      const edited = paragraphTexts(root);
+      const edited = editorContent(root);
       await onSave(originalRef.current, edited);
       originalRef.current = edited;
       setDirty(false);
@@ -260,11 +277,9 @@ interface ContextMenu {
  * user's edits. */
 const MARKS = `ins:not(.${USER_CLASS}), del`;
 
-/** PR marks that `range` touches, outside the read-only tables. */
+/** PR marks that `range` touches. */
 function marksIn(root: HTMLElement, range: Range): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(MARKS)).filter(
-    (el) => range.intersectsNode(el) && !el.closest("[contenteditable=false]")
-  );
+  return Array.from(root.querySelectorAll<HTMLElement>(MARKS)).filter((el) => range.intersectsNode(el));
 }
 
 /** Accepting an insertion or rejecting a deletion keeps the text as plain
@@ -275,15 +290,15 @@ function resolveMark(mark: Element, action: Action): void {
   else mark.remove();
 }
 
-/** One <p> per paragraph; tables are shown but not editable (Save leaves
- * them as they are in the file). */
+/** One <p> per paragraph, and a <table> per run of table rows. A row with
+ * nothing but struck text (one the PR deleted) is marked data-gone: it
+ * isn't in the file, so Save doesn't count it as a row. */
 function buildDom(root: HTMLElement, changes: EditableChange[]): void {
   root.replaceChildren();
   for (const seg of toSegments(changes)) {
     if (seg.kind === "table") {
       const table = document.createElement("table");
       table.className = "redline-table";
-      table.contentEditable = "false";
       const tbody = table.appendChild(document.createElement("tbody"));
       for (const cells of seg.rows) {
         const tr = tbody.appendChild(document.createElement("tr"));
@@ -291,6 +306,7 @@ function buildDom(root: HTMLElement, changes: EditableChange[]): void {
           const td = tr.appendChild(document.createElement("td"));
           for (const c of cell) td.appendChild(markFor(c, c.value));
         }
+        if (!visibleText(tr).trim()) tr.dataset.gone = "true";
       }
       root.appendChild(table);
       continue;
@@ -328,6 +344,15 @@ function markFor(c: EditableChange, text: string): Node {
     return ins;
   }
   return document.createTextNode(text);
+}
+
+/** What the editor shows, in the shape Save writes back: the paragraphs,
+ * and each table row's cells, all without struck text. */
+function editorContent(root: HTMLElement): EditorContent {
+  const rows = Array.from(root.querySelectorAll<HTMLTableRowElement>("table tr"))
+    .filter((tr) => !tr.dataset.gone)
+    .map((tr) => Array.from(tr.cells).map((td) => visibleText(td).trim()));
+  return { paragraphs: paragraphTexts(root), rows };
 }
 
 /** The document's paragraphs as currently edited: every block's text

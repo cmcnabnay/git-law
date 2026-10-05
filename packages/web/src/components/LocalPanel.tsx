@@ -27,7 +27,7 @@ import { isPreviewableDocument, docxBytesToHtml } from "../local/docxPreview.js"
 // Deep imports, like docxPreview's: browser-safe modules only.
 import { htmlToNumberedText } from "@gitlaw/core/src/diff/numberedText.js";
 import { overlayLocalEdits, type EditableChange } from "@gitlaw/core/src/diff/editableRedline.js";
-import { saveParagraphEditsToDocx } from "@gitlaw/core/src/diff/docxPatch.js";
+import { saveEditsToDocx, type EditorContent } from "@gitlaw/core/src/diff/docxPatch.js";
 import { RedlineEditor } from "./RedlineEditor.js";
 
 type Phase = "checking" | "no-handle" | "needs-permission" | "not-a-repo" | "ready";
@@ -301,11 +301,11 @@ export function LocalPanel({ repo, onPushed }: { repo: Repo; onPushed?: () => vo
     }
   }
 
-  async function handleSaveEdits(original: string[], edited: string[]) {
+  async function handleSaveEdits(original: EditorContent, edited: EditorContent) {
     if (!handle || !previewPath) return;
     const fs = new FsaFs(handle);
     const bytes = (await fs.promises.readFile(previewPath)) as Uint8Array;
-    await fs.promises.writeFile(previewPath, await saveParagraphEditsToDocx(bytes, original, edited));
+    await fs.promises.writeFile(previewPath, await saveEditsToDocx(bytes, original, edited));
     await refreshStatus(handle);
   }
 
